@@ -10,6 +10,7 @@ import {
   listUsers,
   sendMessage,
 } from './lib/api';
+import { realtime } from './lib/realtime';
 
 function useLocalStorage<T>(key: string, initial: T) {
   const [value, setValue] = useState<T>(() => {
@@ -29,7 +30,6 @@ const Pill = ({ children }: { children: React.ReactNode }) => (
 );
 
 export default function App() {
-  const [apiUrl] = useState<string>(import.meta.env.VITE_API_URL || 'http://localhost:3000');
   const [users, setUsers] = useState<User[]>([]);
   const [currentUserId, setCurrentUserId] = useLocalStorage<string>('x-user-id', '');
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -37,6 +37,11 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>('');
+
+  const [apiUrl] = useState<string>(import.meta.env.VITE_API_URL || 'http://localhost:3000');
+
+  // 🔔 Giữ set id để chống trùng message khi event + optimistic
+  const knownIdsRef = useRef<Set<string>>(new Set());
 
   const selectedConv = useMemo(
     () => conversations.find((c) => c.id === selectedConvId),
@@ -68,15 +73,16 @@ export default function App() {
     })();
   }, [currentUserId]);
 
-  useEffect(() => {
+   useEffect(() => {
     if (!selectedConvId) return;
     (async () => {
       try {
         setLoading(true);
         setError('');
         const msgs = await listMessages(selectedConvId);
-        // API trả newest->oldest; đảo lại để hiển thị oldest->newest
-        setMessages([...msgs].reverse());
+        const ordered = [...msgs].reverse();
+        knownIdsRef.current = new Set(ordered.map(m => m.id));
+        setMessages(ordered);
       } catch (e: any) {
         setError(e.message);
       } finally {
@@ -101,6 +107,41 @@ export default function App() {
     setSelectedConvId(conv.id);
   };
 
+  // 🔔 Kết nối socket khi chọn currentUserId
+  useEffect(() => {
+    if (!currentUserId) return;
+    const s = realtime.connect(apiUrl, currentUserId);
+
+    const onCreated = (e: any) => {
+      const m = e?.message;
+      if (!m?.id) return;
+      if (knownIdsRef.current.has(m.id)) return; // đã có
+      // chỉ thêm vào UI nếu đúng room đang mở
+      setMessages(prev => {
+        if (!selectedConvId || m.conversationId !== selectedConvId) return prev;
+        knownIdsRef.current.add(m.id);
+        return [...prev, m];
+      });
+      // có thể refresh conv order nhẹ nhàng (tuỳ chọn)
+      listConversations(currentUserId).then(setConversations).catch(() => {});
+    };
+
+    s.on('message.created', onCreated);
+    return () => {
+      s.off('message.created', onCreated);
+      realtime.disconnect();
+      knownIdsRef.current.clear();
+    };
+  }, [currentUserId, apiUrl, selectedConvId]);
+
+  // Khi chọn conversation → join room
+  useEffect(() => {
+    if (!selectedConvId || !currentUserId) return;
+    realtime.joinConversation(selectedConvId);
+    // reset known ids theo room
+    knownIdsRef.current.clear();
+  }, [selectedConvId, currentUserId]);
+
   const onSend = async (text: string) => {
     if (!selectedConv) return;
     const optimistic: Message = {
@@ -111,20 +152,23 @@ export default function App() {
       content: text,
       createdAt: new Date().toISOString(),
     } as any;
-    setMessages((prev) => [...prev, optimistic]);
+
+    setMessages(prev => [...prev, optimistic]);
     try {
       const real = await sendMessage(currentUserId, {
         conversationId: selectedConv.id,
         type: 'TEXT',
         content: text,
       });
-      setMessages((prev) => prev.map((m) => (m.id === optimistic.id ? real : m)));
-      // refresh danh sách để cập nhật updatedAt
+      // thay thế optimistic → real; đánh dấu id đã biết để tránh event đẩy lần nữa
+      setMessages(prev => prev.map(m => (m.id === optimistic.id ? real : m)));
+      knownIdsRef.current.add(real.id);
+      // conv order
       const convs = await listConversations(currentUserId);
       setConversations(convs);
     } catch (e: any) {
       setError(e.message);
-      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+      setMessages(prev => prev.filter(m => m.id !== optimistic.id));
     }
   };
 
