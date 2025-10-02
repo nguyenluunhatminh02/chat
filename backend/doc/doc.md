@@ -1,101 +1,42 @@
-Tới **PHẦN 5 — WebSocket realtime (Socket.IO) phát `message.created` khi POST /messages`**. Nhỏ gọn, không cần Redis/Kafka.
+Tới **PHẦN 8 — Edit & Delete (soft-delete) + realtime events**. Phần này nhỏ, không đụng Kafka. Làm xong bạn có thể **sửa nội dung tin** và **xóa mềm** rồi phát WS: `message.updated` / `message.deleted`.
+
+> Ghi chú: Prisma `Message` đã có `editedAt`, `deletedAt` từ Phần 4 → không cần migrate.
 
 ---
 
-## 0) Cài thêm package
+## 1) DTO cho chỉnh sửa
 
-```bash
-pnpm add @nestjs/websockets @nestjs/platform-socket.io
-```
-
----
-
-## 1) Tạo Gateway
-
-**`src/websockets/messaging.gateway.ts`**
+**`src/modules/messages/dto/update-message.dto.ts`**
 
 ```ts
-import {
-  WebSocketGateway, WebSocketServer, SubscribeMessage,
-  OnGatewayConnection, OnGatewayDisconnect, MessageBody, ConnectedSocket
-} from '@nestjs/websockets';
-import { Server, Socket } from 'socket.io';
+import { IsOptional, IsString, MaxLength } from 'class-validator';
 
-@WebSocketGateway({ cors: { origin: '*' } })
-export class MessagingGateway implements OnGatewayConnection, OnGatewayDisconnect {
-  @WebSocketServer() server: Server;
-
-  async handleConnection(client: Socket) {
-    // Nhận userId từ handshake.auth.userId (client gửi lên)
-    const userId = client.handshake.auth?.userId;
-    if (!userId) return client.disconnect(true);
-    client.join(`u:${userId}`); // room riêng cho user nếu cần
-  }
-
-  async handleDisconnect(_client: Socket) {
-    // có thể log/cleanup nếu cần
-  }
-
-  @SubscribeMessage('join.conversation')
-  joinConversation(@MessageBody() body: any, @ConnectedSocket() client: Socket) {
-    const cid = body?.conversationId;
-    if (!cid) return;
-    client.join(`c:${cid}`);
-  }
-
-  emitToConversation(conversationId: string, event: string, payload: any) {
-    this.server.to(`c:${conversationId}`).emit(event, payload);
-  }
+export class UpdateMessageDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  content?: string; // cho TEXT/caption
 }
 ```
 
 ---
 
-## 2) Đăng ký Gateway vào AppModule
+## 2) Service: edit & soft-delete (kèm kiểm quyền)
 
-Mở **`src/app.module.ts`** và thêm provider:
-
-```ts
-import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
-import { PrismaModule } from './common/prisma/prisma.module';
-import { HealthModule } from './health/health.module';
-import { UsersModule } from './modules/users/users.module';
-import { ConversationsModule } from './modules/conversations/conversations.module';
-import { MessagesModule } from './modules/messages/messages.module';
-import { MessagingGateway } from './websockets/messaging.gateway';
-
-@Module({
-  imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
-    PrismaModule,
-    HealthModule,
-    UsersModule,
-    ConversationsModule,
-    MessagesModule,
-  ],
-  providers: [MessagingGateway], // <— thêm dòng này
-})
-export class AppModule {}
-```
-
----
-
-## 3) Sửa MessagesService để phát WS sau khi tạo tin
-
-**`src/modules/messages/messages.service.ts`** (chỉ khác: inject `MessagingGateway` và emit sau khi create)
+Cập nhật **`src/modules/messages/messages.service.ts`** (thêm 2 method `edit` và `softDelete`):
 
 ```ts
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { MessagingGateway } from '../../websockets/messaging.gateway';
+import { UpdateMessageDto } from './dto/update-message.dto';
 
 @Injectable()
 export class MessagesService {
   constructor(
     private prisma: PrismaService,
-    private gateway: MessagingGateway,        // <— inject gateway
+    private gateway: MessagingGateway,
   ) {}
 
   async list(conversationId: string, cursor?: string, limit = 30) {
@@ -130,74 +71,178 @@ export class MessagesService {
       }),
     ]);
 
-    // 🔔 Phát realtime tới room của conversation
     this.gateway.emitToConversation(dto.conversationId, 'message.created', { message: msg });
-
     return msg;
+  }
+
+  // ====== NEW: Edit message ======
+  async edit(userId: string, messageId: string, dto: UpdateMessageDto) {
+    if (!dto.content?.trim()) throw new BadRequestException('Content required');
+
+    const msg = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      select: { id: true, senderId: true, conversationId: true, deletedAt: true },
+    });
+    if (!msg) throw new NotFoundException('Message not found');
+
+    // chỉ cho chính người gửi sửa
+    if (msg.senderId !== userId) throw new ForbiddenException('Only sender can edit');
+    if (msg.deletedAt) throw new BadRequestException('Message already deleted');
+
+    const updated = await this.prisma.message.update({
+      where: { id: messageId },
+      data: { content: dto.content, editedAt: new Date() },
+    });
+
+    this.gateway.emitToConversation(msg.conversationId, 'message.updated', {
+      id: updated.id,
+      content: updated.content,
+      editedAt: updated.editedAt,
+    });
+
+    return updated;
+  }
+
+  // ====== NEW: Soft delete ======
+  async softDelete(userId: string, messageId: string) {
+    const msg = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      select: { id: true, senderId: true, conversationId: true, deletedAt: true },
+    });
+    if (!msg) throw new NotFoundException('Message not found');
+    if (msg.deletedAt) return msg; // idempotent
+
+    // cho phép: chính sender hoặc member có role ADMIN/OWNER
+    const member = await this.prisma.conversationMember.findUnique({
+      where: { conversationId_userId: { conversationId: msg.conversationId, userId } },
+      select: { role: true },
+    });
+    if (!member) throw new ForbiddenException('Not a member');
+
+    const isSender = msg.senderId === userId;
+    const canAdmin = member.role === 'ADMIN' || member.role === 'OWNER';
+    if (!isSender && !canAdmin) throw new ForbiddenException('No permission to delete');
+
+    const deleted = await this.prisma.message.update({
+      where: { id: messageId },
+      data: { deletedAt: new Date(), content: null }, // xóa nội dung hiển thị
+    });
+
+    this.gateway.emitToConversation(msg.conversationId, 'message.deleted', {
+      id: deleted.id,
+      deletedAt: deleted.deletedAt,
+    });
+
+    return deleted;
   }
 }
 ```
 
 ---
 
-## 4) Test nhanh realtime (2 tab trình duyệt)
+## 3) Controller: endpoints PATCH & DELETE
 
-### Cách nạp Socket.IO client trong console
+Cập nhật **`src/modules/messages/messages.controller.ts`**:
 
-Mở **2 tab** tới bất kỳ trang (hoặc `about:blank`), mở DevTools Console và chạy:
+```ts
+import { Body, Controller, Get, Param, Post, Patch, Delete, Query } from '@nestjs/common';
+import { MessagesService } from './messages.service';
+import { SendMessageDto } from './dto/send-message.dto';
+import { UpdateMessageDto } from './dto/update-message.dto';
+import { UserId } from '../../common/decorators/user-id.decorator';
 
-**Tab A (u1)**
+@Controller('messages')
+export class MessagesController {
+  constructor(private svc: MessagesService) {}
 
-```js
-var s=document.createElement('script');s.src='https://cdn.socket.io/4.7.2/socket.io.min.js';document.head.appendChild(s);
-setTimeout(()=>{
-  window.s1 = io("http://localhost:3000",{ transports:['websocket'], auth:{ userId:'u1' }});
-  s1.emit('join.conversation',{ conversationId:'<CID>' }); // thay <CID> = id conversation
-  s1.on('message.created', (e)=>console.log('A got:', e));
-}, 800);
+  @Get(':conversationId')
+  list(@Param('conversationId') cid: string, @Query('cursor') cursor?: string, @Query('limit') limit = 30) {
+    return this.svc.list(cid, cursor, Number(limit));
+  }
+
+  @Post()
+  send(@UserId() userId: string, @Body() dto: SendMessageDto) {
+    return this.svc.send(userId, dto);
+  }
+
+  // ====== NEW: Edit ======
+  @Patch(':id')
+  edit(@UserId() userId: string, @Param('id') id: string, @Body() dto: UpdateMessageDto) {
+    return this.svc.edit(userId, id, dto);
+  }
+
+  // ====== NEW: Soft delete ======
+  @Delete(':id')
+  delete(@UserId() userId: string, @Param('id') id: string) {
+    return this.svc.softDelete(userId, id);
+  }
+}
 ```
 
-**Tab B (u2)**
+> `GET /messages/:conversationId` đã lọc `deletedAt: null`, nên tin đã xóa sẽ không còn trong danh sách. Clients nhận `message.deleted` để ẩn ngay lập tức.
 
-```js
-var s=document.createElement('script');s.src='https://cdn.socket.io/4.7.2/socket.io.min.js';document.head.appendChild(s);
-setTimeout(()=>{
-  window.s2 = io("http://localhost:3000",{ transports:['websocket'], auth:{ userId:'u2' }});
-  s2.emit('join.conversation',{ conversationId:'<CID>' });
-  s2.on('message.created', (e)=>console.log('B got:', e));
-}, 800);
-```
+---
 
-> `<CID>` là `conversation.id` bạn tạo ở phần 3.
+## 4) Test nhanh (Windows-friendly)
 
-### Gửi tin bằng cURL (Windows)
+### 4.1 Sửa tin nhắn
 
 **PowerShell**
 
 ```powershell
-curl.exe -X POST http://localhost:3000/messages `
+curl.exe -X PATCH http://localhost:3000/messages/<MID> `
   -H 'Content-Type: application/json' `
   -H 'X-User-Id: u1' `
-  -d '{"conversationId":"<CID>","type":"TEXT","content":"Hello realtime!"}'
+  -d '{"content":"(edited) new content"}'
 ```
 
-**Windows CMD**
+**CMD**
 
 ```bat
-curl -X POST http://localhost:3000/messages ^
+curl -X PATCH http://localhost:3000/messages/<MID> ^
  -H "Content-Type: application/json" ^
  -H "X-User-Id: u1" ^
- -d "{\"conversationId\":\"<CID>\",\"type\":\"TEXT\",\"content\":\"Hello realtime!\"}"
+ -d "{\"content\":\"(edited) new content\"}"
 ```
 
-Cả **Tab A** và **Tab B** sẽ log `message.created`.
+> `<MID>` là id message do **u1** gửi.
+> Hai tab đã join room `c:<CID>` (Phần 5) sẽ nhận WS sự kiện:
+
+```js
+// event name: 'message.updated'
+{ id: "<MID>", content: "(edited) new content", editedAt: "..." }
+```
+
+### 4.2 Xóa mềm
+
+**PowerShell**
+
+```powershell
+curl.exe -X DELETE http://localhost:3000/messages/<MID> -H 'X-User-Id: u1'
+```
+
+**CMD**
+
+```bat
+curl -X DELETE http://localhost:3000/messages/<MID> -H "X-User-Id: u1"
+```
+
+Clients nhận:
+
+```js
+// event name: 'message.deleted'
+{ id: "<MID>", deletedAt: "..." }
+```
+
+`GET /messages/<CID>` sẽ không còn thấy tin này.
 
 ---
 
-## ✅ Tiêu chí hoàn thành Phần 5
+## ✅ Tiêu chí hoàn thành Phần 8
 
-* Socket.IO Gateway hoạt động, client join room `c:<conversationId>`.
-* Khi POST `/messages`, server **emit** `message.created` đến room đó.
-* Test thành công với 2 tab, 2 user khác nhau.
+* Sửa tin: `PATCH /messages/:id` (chỉ **sender** được sửa, không sửa tin đã xóa).
+* Xóa mềm: `DELETE /messages/:id` (sender **hoặc** ADMIN/OWNER).
+* Realtime: phát `message.updated` / `message.deleted` tới room của conversation.
+* Danh sách tin đã loại bỏ tin xóa.
 
-Bạn muốn **Phần 6** không? Gợi ý tiếp theo: **Presence đơn giản (online/last seen) bằng Redis TTL** hoặc **Edit/Delete + Read Receipts** (không cần Redis). Chọn một nhánh để mình viết tiếp nha.
+Bạn muốn **PHẦN 9** tiếp theo không? Đề xuất: **Reactions + Reply/Thread** (nhẹ) **hoặc** **Idempotency-Key** để chống gửi trùng (và chuẩn bị lên Outbox/Kafka). Chọn một hướng nhé!

@@ -46,9 +46,21 @@ export class MessagesService {
       }),
     ]);
 
-    // 🔔 Phát realtime tới room của conversation
+    // 🔔 Phát realtime tới room của conversation (đang xem)
     this.gateway.emitToConversation(dto.conversationId, 'message.created', {
       message: msg,
+    });
+
+    // 🔔 Phát "unread.bump" tới từng user member (không phải người gửi)
+    //  -> để các tab không đang mở phòng đó vẫn tăng unread realtime
+    const members = await this.prisma.conversationMember.findMany({
+      where: { conversationId: dto.conversationId },
+      select: { userId: true },
+    });
+    const others = members.map((m) => m.userId).filter((id) => id !== userId);
+    this.gateway.emitToUsers(others, 'unread.bump', {
+      conversationId: dto.conversationId,
+      messageId: msg.id,
     });
 
     return msg;

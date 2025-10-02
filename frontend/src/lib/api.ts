@@ -50,3 +50,28 @@ export function sendMessage(
 ): Promise<Message> {
   return http<Message>('/messages', { method: 'POST', body: JSON.stringify(data) }, userId);
 }
+
+
+export function getPresence(userId: string): Promise<{ userId: string; online: boolean; lastSeen: string | null }> {
+  return http(`/presence/${userId}`, { method: 'GET' });
+}
+
+export function beatPresence(userId: string): Promise<{ ok: boolean; userId: string; ttlSec: number }> {
+  return http(`/presence/heartbeat`, { method: 'POST' }, userId);
+}
+
+
+// ===== Read Receipts / Unread =====
+export function markRead(
+  userId: string,
+  payload: { conversationId: string; messageId: string }
+): Promise<{ ok: boolean; conversationId: string; messageId: string; readAt: string }> {
+  return http('/receipts/read', { method: 'POST', body: JSON.stringify(payload) }, userId);
+}
+
+export function getUnread(
+  userId: string,
+  conversationId: string
+): Promise<{ conversationId: string; unread: number; since: string }> {
+  return http(`/receipts/unread/${conversationId}`, { method: 'GET' }, userId);
+}

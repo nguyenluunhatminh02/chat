@@ -2,13 +2,16 @@ import { io, Socket } from 'socket.io-client';
 
 export class RealtimeClient {
   private socket?: Socket;
+  private hbTimer?: any;
 
   connect(apiUrl: string, userId: string) {
-    if (this.socket) this.socket.disconnect();
+    if (this.socket) this.disconnect();
     this.socket = io(apiUrl, {
       transports: ['websocket'],
-      auth: { userId }, // trùng với server handshake.auth.userId
+      auth: { userId },
     });
+    // gửi heartbeat mỗi 30s
+    this.hbTimer = setInterval(() => this.socket?.emit('presence.heartbeat', {}), 30000);
     return this.socket;
   }
 
@@ -26,6 +29,8 @@ export class RealtimeClient {
   }
 
   disconnect() {
+    if (this.hbTimer) clearInterval(this.hbTimer);
+    this.hbTimer = undefined;
     this.socket?.disconnect();
     this.socket = undefined;
   }
