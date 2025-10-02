@@ -9,7 +9,7 @@ import {
   listConversations,
   listMessages,
   listUsers,
-  sendMessage,
+  sendMessageIdempotent,
   updateMessage,
   deleteMessage,
   listReactions,
@@ -17,6 +17,8 @@ import {
   getThread,
 } from './lib/api';
 import { realtime } from './lib/realtime';
+
+/* ------------------------------ utilities ------------------------------ */
 
 function useLocalStorage<T>(key: string, initial: T) {
   const [value, setValue] = useState<T>(() => {
@@ -36,7 +38,19 @@ const Pill = ({ children }: { children: React.ReactNode }) => (
 );
 
 // A few common emojis for quick reactions
-const COMMON_EMOJIS = ['👍','❤️','😂','🎉','🔥','😮','😢','🙏'];
+const COMMON_EMOJIS = ['👍', '❤️', '😂', '🎉', '🔥', '😮', '😢', '🙏'];
+
+/* --------------------------- pending send types -------------------------- */
+
+type SendPayload = {
+  conversationId: string;
+  type: 'TEXT' | 'IMAGE' | 'FILE';
+  content?: string;
+  parentId?: string;
+};
+type Pending = { key: string; status: 'sending' | 'failed'; attempts: number; payload: SendPayload };
+
+/* ---------------------------------- App --------------------------------- */
 
 export default function App() {
   const [users, setUsers] = useState<User[]>([]);
@@ -56,10 +70,16 @@ export default function App() {
   // reactions: messageId -> emoji -> list of userIds
   const [reactions, setReactions] = useState<Record<string, Record<string, string[]>>>({});
 
+  // reply count: parentId -> number
+  const [replyCounts, setReplyCounts] = useState<Record<string, number>>({});
+
   // thread state
   const [openThreadId, setOpenThreadId] = useState<string | null>(null);
   const [threadMap, setThreadMap] = useState<Record<string, Message[]>>({});
   const [threadInput, setThreadInput] = useState<string>('');
+
+  // pending sends (persist) keyed by tmpId (optimistic bubble id)
+  const [pendingSends, setPendingSends] = useLocalStorage<Record<string, Pending>>('pending-sends', {});
 
   const selectedConv = useMemo(
     () => conversations.find((c) => c.id === selectedConvId),
@@ -72,7 +92,8 @@ export default function App() {
     return users.find((u) => u.id === otherId) || (otherId ? ({ id: otherId, email: otherId } as any) : null);
   }
 
-  // Initial data
+  /* --------------------------- initial bootstrap -------------------------- */
+
   useEffect(() => {
     (async () => {
       try {
@@ -107,10 +128,12 @@ export default function App() {
         const ordered = [...msgs].reverse();
         knownIdsRef.current = new Set(ordered.map((m) => m.id));
         setMessages(ordered);
-        // clear thread + reactions cache for new room (optional)
+
+        // reset per-room states
         setOpenThreadId(null);
         setThreadMap({});
         setReactions({});
+        setReplyCounts({});
       } catch (e: any) {
         setError(e.message);
       } finally {
@@ -118,6 +141,8 @@ export default function App() {
       }
     })();
   }, [selectedConvId]);
+
+  /* ---------------------------- create entities --------------------------- */
 
   const onCreateUser = async (email: string, name?: string) => {
     const u = await createUser({ email, name });
@@ -135,7 +160,9 @@ export default function App() {
     setSelectedConvId(conv.id);
   };
 
-  // Kết nối socket
+  /* ------------------------------- realtime ------------------------------- */
+
+  // connect socket
   useEffect(() => {
     if (!currentUserId) return;
     const s = realtime.connect(apiUrl, currentUserId);
@@ -145,30 +172,32 @@ export default function App() {
       if (!m?.id) return;
 
       if (m.conversationId === selectedConvId) {
-        // đang mở phòng này
         if (!knownIdsRef.current.has(m.id)) {
           knownIdsRef.current.add(m.id);
           setMessages((prev) => [...prev, m]);
         }
-        // nếu đang mở thread đúng parentId -> nhét vào thread
-        if (m.parentId && openThreadId === m.parentId) {
-          setThreadMap((prev) => {
-            const arr = prev[m.parentId!] || [];
-            const next = [...arr, m].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-            return { ...prev, [m.parentId!]: next };
-          });
+        // reply count bump if this is a reply
+        if (m.parentId) {
+          setReplyCounts((c) => ({ ...c, [m.parentId!]: (c[m.parentId!] || 0) + 1 }));
+          if (openThreadId === m.parentId) {
+            setThreadMap((prev) => {
+              const arr = prev[m.parentId!] || [];
+              const next = [...arr, m].sort(
+                (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+              );
+              return { ...prev, [m.parentId!]: next };
+            });
+          }
         }
-        // refresh danh sách (order)
+        // refresh conv order
         listConversations(currentUserId).then(setConversations).catch(() => {});
       }
     };
 
-    // Realtime edit
     const onUpdated = (e: any) => {
       const { id, content, editedAt } = e || {};
       if (!id) return;
       setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, content, editedAt } : m)));
-      // nếu có trong threadMap thì cập nhật luôn
       setThreadMap((prev) => {
         const p = { ...prev };
         Object.keys(p).forEach((pid) => {
@@ -178,9 +207,8 @@ export default function App() {
       });
     };
 
-    // Realtime delete -> map thành placeholder
     const onDeleted = (e: any) => {
-      const { id, deletedAt } = e || {};
+      const { id, deletedAt, parentId } = e || {};
       if (!id) return;
       setMessages((prev) =>
         prev.map((m) => (m.id === id ? { ...m, content: null, deletedAt: deletedAt || new Date().toISOString() } : m))
@@ -194,15 +222,18 @@ export default function App() {
         });
         return p;
       });
-      // (optional) clear reactions cache for deleted msg
+      // clear reactions cache for deleted msg
       setReactions((prev) => {
         if (!prev[id]) return prev;
-        const { [id]: _, ...rest } = prev;
+        const { [id]: _drop, ...rest } = prev;
         return rest;
       });
+      // reply count decrease if this msg was a reply
+      if (parentId) {
+        setReplyCounts((c) => ({ ...c, [parentId]: Math.max(0, (c[parentId] || 0) - 1) }));
+      }
     };
 
-    // Realtime reaction added
     const onReactionAdded = (e: any) => {
       const { messageId, userId, emoji } = e || {};
       if (!messageId || !emoji || !userId) return;
@@ -215,7 +246,6 @@ export default function App() {
       });
     };
 
-    // Realtime reaction removed
     const onReactionRemoved = (e: any) => {
       const { messageId, userId, emoji } = e || {};
       if (!messageId || !emoji || !userId) return;
@@ -224,7 +254,6 @@ export default function App() {
         const arr = forMsg[emoji] || [];
         const next = arr.filter((u) => u !== userId);
         if (next.length === 0) {
-          // remove emoji key if empty
           const { [emoji]: _drop, ...rest } = forMsg;
           return { ...prev, [messageId]: rest };
         }
@@ -232,11 +261,19 @@ export default function App() {
       });
     };
 
+    // optional: if you emit 'thread.count.bump' on backend
+    const onThreadBump = (e: any) => {
+      const { parentId, delta } = e || {};
+      if (!parentId || !delta) return;
+      setReplyCounts((c) => ({ ...c, [parentId]: Math.max(0, (c[parentId] || 0) + delta) }));
+    };
+
     s.on('message.created', onCreated);
     s.on('message.updated', onUpdated);
     s.on('message.deleted', onDeleted);
     s.on('reaction.added', onReactionAdded);
     s.on('reaction.removed', onReactionRemoved);
+    s.on('thread.count.bump', onThreadBump);
 
     return () => {
       s.off('message.created', onCreated);
@@ -244,12 +281,13 @@ export default function App() {
       s.off('message.deleted', onDeleted);
       s.off('reaction.added', onReactionAdded);
       s.off('reaction.removed', onReactionRemoved);
+      s.off('thread.count.bump', onThreadBump);
       realtime.disconnect();
       knownIdsRef.current.clear();
     };
   }, [currentUserId, apiUrl, selectedConvId, openThreadId]);
 
-  // Join room khi chọn conversation
+  // join room when selecting conversation
   useEffect(() => {
     if (!selectedConvId || !currentUserId) return;
     realtime.joinConversation(selectedConvId);
@@ -257,10 +295,44 @@ export default function App() {
     setOpenThreadId(null);
   }, [selectedConvId, currentUserId]);
 
+  /* ---------------------------- idempotent send --------------------------- */
+
+  // Retry a pending tmp bubble using same Idempotency-Key
+  const retrySend = async (tmpId: string) => {
+    const p = pendingSends[tmpId];
+    if (!p) return;
+
+    setPendingSends((m) => ({ ...m, [tmpId]: { ...p, status: 'sending', attempts: p.attempts + 1 } }));
+    try {
+      const real = await sendMessageIdempotent(currentUserId, p.payload, { key: p.key });
+
+      setMessages((prev) => prev.map((m) => (m.id === tmpId ? real : m)));
+      setPendingSends(({ [tmpId]: _drop, ...rest }) => rest);
+
+      const convs = await listConversations(currentUserId);
+      setConversations(convs);
+    } catch {
+      setPendingSends((m) => ({ ...m, [tmpId]: { ...p, status: 'failed' } }));
+    }
+  };
+
+  // Resume pending sends after reload
+  useEffect(() => {
+    Object.entries(pendingSends).forEach(([tmpId, v]) => {
+      if (v.status === 'sending') retrySend(tmpId);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const onSend = async (text: string) => {
     if (!selectedConv) return;
+
+    // tmp bubble & idem key
+    const tmpId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const idemKey = (crypto as any)?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
     const optimistic: Message = {
-      id: `tmp_${Date.now()}`,
+      id: tmpId,
       conversationId: selectedConv.id,
       senderId: currentUserId,
       type: 'TEXT',
@@ -269,23 +341,27 @@ export default function App() {
     } as any;
 
     setMessages((prev) => [...prev, optimistic]);
+
+    const payload: SendPayload = { conversationId: selectedConv.id, type: 'TEXT', content: text };
+    setPendingSends((m) => ({ ...m, [tmpId]: { key: idemKey, status: 'sending', attempts: 0, payload } }));
+
     try {
-      const real = await sendMessage(currentUserId, {
-        conversationId: selectedConv.id,
-        type: 'TEXT',
-        content: text,
-      });
-      setMessages((prev) => prev.map((m) => (m.id === optimistic.id ? real : m)));
+      const real = await sendMessageIdempotent(currentUserId, payload, { key: idemKey });
+
+      setMessages((prev) => prev.map((m) => (m.id === tmpId ? real : m)));
       knownIdsRef.current.add(real.id);
+      setPendingSends(({ [tmpId]: _drop, ...rest }) => rest);
+
       const convs = await listConversations(currentUserId);
       setConversations(convs);
     } catch (e: any) {
       setError(e.message);
-      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+      setPendingSends((m) => ({ ...m, [tmpId]: { ...m[tmpId], status: 'failed' } }));
     }
   };
 
-  // Presence polling cho DIRECT
+  /* ------------------------------ presence poll ------------------------------ */
+
   useEffect(() => {
     const peer = getDirectPeer(selectedConv, users, currentUserId);
     if (!peer?.id) {
@@ -308,6 +384,8 @@ export default function App() {
     };
   }, [selectedConv?.id, users.length, currentUserId]);
 
+  /* ------------------------------ edit / delete ------------------------------ */
+
   const handleEdit = async (id: string, content: string) => {
     try {
       const updated = await updateMessage(currentUserId, id, { content });
@@ -326,7 +404,7 @@ export default function App() {
   };
 
   const handleDelete = async (id: string) => {
-    // optimistic -> show placeholder ngay
+    // optimistic placeholder
     setMessages((prev) =>
       prev.map((m) => (m.id === id ? { ...m, content: null, deletedAt: new Date().toISOString() } : m))
     );
@@ -346,7 +424,8 @@ export default function App() {
     }
   };
 
-  // Load reactions for a specific message lazily
+  /* ------------------------------ reactions ------------------------------ */
+
   const ensureReactions = async (messageId: string) => {
     if (reactions[messageId]) return;
     try {
@@ -360,7 +439,6 @@ export default function App() {
     } catch {}
   };
 
-  // Toggle reaction with optimistic update
   const onToggleReact = async (messageId: string, emoji: string) => {
     const byMe = (reactions[messageId]?.[emoji] || []).includes(currentUserId);
     // optimistic
@@ -376,7 +454,7 @@ export default function App() {
     try {
       await toggleReaction(currentUserId, { messageId, emoji });
     } catch {
-      // rollback if failed
+      // rollback
       setReactions((prev) => {
         const msgMap = prev[messageId] ? { ...prev[messageId] } : {};
         const set = new Set(msgMap[emoji] || []);
@@ -388,7 +466,8 @@ export default function App() {
     }
   };
 
-  // Thread open/load & reply
+  /* --------------------------------- thread -------------------------------- */
+
   const openThread = async (parentId: string) => {
     setOpenThreadId((cur) => (cur === parentId ? null : parentId));
     if (!threadMap[parentId]) {
@@ -398,13 +477,20 @@ export default function App() {
           (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
         );
         setThreadMap((prev) => ({ ...prev, [parentId]: ordered }));
+        // sync reply count from server data (not counting deleted)
+        setReplyCounts((c) => ({ ...c, [parentId]: ordered.filter((r) => !r.deletedAt).length }));
       } catch {}
     }
   };
+
   const sendThreadReply = async (parentId: string, text: string) => {
     if (!selectedConv) return;
+    // Reuse sending pipeline with idempotent? For brevity, do a lightweight optimistic + sendMessageIdempotent:
+    const tmpId = `tmp_t_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const idemKey = (crypto as any)?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
     const optimistic: Message = {
-      id: `tmp_t_${Date.now()}`,
+      id: tmpId,
       conversationId: selectedConv.id,
       senderId: currentUserId,
       type: 'TEXT',
@@ -412,30 +498,32 @@ export default function App() {
       parentId,
       createdAt: new Date().toISOString(),
     } as any;
+
     setThreadMap((prev) => {
       const arr = prev[parentId] || [];
       return { ...prev, [parentId]: [...arr, optimistic] };
     });
+
+    const payload: SendPayload = {
+      conversationId: selectedConv.id,
+      type: 'TEXT',
+      content: text,
+      parentId,
+    };
+
     try {
-      const real = await sendMessage(currentUserId, {
-        conversationId: selectedConv.id,
-        type: 'TEXT',
-        content: text,
-        parentId,
-      });
+      const real = await sendMessageIdempotent(currentUserId, payload, { key: idemKey });
       setThreadMap((prev) => {
         const arr = prev[parentId] || [];
-        return {
-          ...prev,
-          [parentId]: arr.map((m) => (m.id === optimistic.id ? real : m)),
-        };
+        return { ...prev, [parentId]: arr.map((m) => (m.id === tmpId ? real : m)) };
       });
+      setReplyCounts((c) => ({ ...c, [parentId]: (c[parentId] || 0) + 1 }));
     } catch (e: any) {
       setError(e.message);
       // rollback
       setThreadMap((prev) => {
         const arr = prev[parentId] || [];
-        return { ...prev, [parentId]: arr.filter((m) => m.id !== optimistic.id) };
+        return { ...prev, [parentId]: arr.filter((m) => m.id !== tmpId) };
       });
     }
   };
@@ -476,11 +564,18 @@ export default function App() {
                     : selectedConv.title || 'Untitled group'}
                 </div>
                 <div className="text-xs text-gray-500 truncate">
-                  <span className="mr-2"><Pill>{selectedConv.type}</Pill></span>
+                  <span className="mr-2">
+                    <Pill>{selectedConv.type}</Pill>
+                  </span>
                   {selectedConv.type === 'DIRECT' ? (
-                    peerPresence?.online
-                      ? <span className="text-emerald-600">Online</span>
-                      : <span>Last seen {peerPresence?.lastSeen ? new Date(peerPresence.lastSeen).toLocaleString() : '—'}</span>
+                    peerPresence?.online ? (
+                      <span className="text-emerald-600">Online</span>
+                    ) : (
+                      <span>
+                        Last seen{' '}
+                        {peerPresence?.lastSeen ? new Date(peerPresence.lastSeen).toLocaleString() : '—'}
+                      </span>
+                    )
                   ) : (
                     <span>{selectedConv.members.length} member(s)</span>
                   )}
@@ -507,12 +602,15 @@ export default function App() {
               reactions={reactions}
               ensureReactions={ensureReactions}
               onToggleReact={onToggleReact}
+              replyCounts={replyCounts}
               openThreadId={openThreadId}
               openThread={openThread}
               threadMap={threadMap}
               threadInput={threadInput}
               setThreadInput={setThreadInput}
               sendThreadReply={sendThreadReply}
+              pendingSends={pendingSends}
+              retrySend={retrySend}
             />
           ) : (
             <div className="h-full grid place-items-center text-gray-400">No conversation selected</div>
@@ -523,11 +621,15 @@ export default function App() {
   );
 }
 
+/* ------------------------------ small helpers ----------------------------- */
+
 function directTitle(conv: Conversation, users: User[], me: string) {
   const other = conv.members.map((m) => m.userId).find((id) => id !== me);
   const u = users.find((x) => x.id === other);
   return u ? u.name || u.email : other || 'DIRECT';
 }
+
+/* ------------------------------- components ------------------------------- */
 
 function UserSwitcher({
   users,
@@ -744,12 +846,15 @@ function MessagePane({
   reactions,
   ensureReactions,
   onToggleReact,
+  replyCounts,
   openThreadId,
   openThread,
   threadMap,
   threadInput,
   setThreadInput,
   sendThreadReply,
+  pendingSends,
+  retrySend,
 }: {
   conversationId: string;
   currentUserId: string;
@@ -761,12 +866,15 @@ function MessagePane({
   reactions: Record<string, Record<string, string[]>>;
   ensureReactions: (messageId: string) => Promise<void>;
   onToggleReact: (messageId: string, emoji: string) => Promise<void>;
+  replyCounts: Record<string, number>;
   openThreadId: string | null;
   openThread: (parentId: string) => Promise<void>;
   threadMap: Record<string, Message[]>;
   threadInput: string;
   setThreadInput: (v: string) => void;
   sendThreadReply: (parentId: string, text: string) => Promise<void>;
+  pendingSends: Record<string, Pending>;
+  retrySend: (tmpId: string) => Promise<void>;
 }) {
   const [text, setText] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -809,13 +917,20 @@ function MessagePane({
           const isEditing = editingId === m.id;
           const isDeleted = !!m.deletedAt;
 
+          const isTmp = m.id.startsWith('tmp_');
+          const pending = isTmp ? pendingSends[m.id] : undefined;
+          const isSending = pending?.status === 'sending';
+          const isFailed = pending?.status === 'failed';
+
           const msgReactions = reactions[m.id] || {};
           const sortedEmojis = Object.keys(msgReactions).sort();
+
+          const replyCount = replyCounts[m.id] || 0;
 
           return (
             <div key={m.id} className={clsx('flex group', mine ? 'justify-end' : 'justify-start')}>
               <div className="relative max-w-[70%]">
-                {/* Actions (chỉ hiện với tin của mình và chưa xóa) */}
+                {/* Actions (only owner & not deleted) */}
                 {mine && !isEditing && !isDeleted && (
                   <div className="absolute -top-2 right-0 opacity-0 group-hover:opacity-100 transition">
                     <div className="flex gap-1">
@@ -857,6 +972,16 @@ function MessagePane({
                         >
                           <span>{dayjs(m.createdAt).format('HH:mm')}</span>
                           {m.editedAt && <span className="opacity-80">· edited</span>}
+                          {isTmp && isSending && <span className="opacity-80">· Đang gửi…</span>}
+                          {isTmp && isFailed && (
+                            <button
+                              className={clsx('underline', mine ? 'text-rose-200' : 'text-rose-600')}
+                              onClick={() => retrySend(m.id)}
+                              title="Gửi lại"
+                            >
+                              · Không gửi được — Thử lại
+                            </button>
+                          )}
                         </div>
                       </>
                     ) : (
@@ -895,7 +1020,7 @@ function MessagePane({
                   )}
                 </div>
 
-                {/* Reactions row (ẩn nếu đã xóa) */}
+                {/* Reactions + Reply (hidden if deleted) */}
                 {!isDeleted && (
                   <div className={clsx('mt-1 flex flex-wrap items-center gap-1', mine ? 'justify-end' : 'justify-start')}>
                     {sortedEmojis.map((emoji) => {
@@ -918,23 +1043,19 @@ function MessagePane({
                         </button>
                       );
                     })}
-                    {/* Quick picker */}
-                    <ReactionPicker
-                      onPick={(emoji) => onToggleReact(m.id, emoji)}
-                      disabled={isDeleted}
-                    />
-                    {/* Reply */}
+                    <ReactionPicker onPick={(emoji) => onToggleReact(m.id, emoji)} disabled={isDeleted} />
                     <button
                       className="ml-2 text-[11px] px-2 h-6 rounded-full border bg-white hover:bg-gray-50"
                       onClick={() => openThread(m.id)}
                       disabled={isDeleted}
+                      title="Open thread"
                     >
-                      Reply
+                      {replyCount > 0 ? `Reply · ${replyCount}` : 'Reply'}
                     </button>
                   </div>
                 )}
 
-                {/* Thread inline (nếu mở đúng message) */}
+                {/* Thread inline */}
                 {openThreadId === m.id && (
                   <div className="mt-2 border rounded-lg bg-gray-50">
                     <div className="px-3 py-2 text-xs text-gray-600">Thread</div>

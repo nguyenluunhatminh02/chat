@@ -119,3 +119,16 @@ model Reaction {
   @@unique([messageId, userId, emoji])   // mỗi user/emoji chỉ 1 lần trên 1 message
   @@index([messageId])
 }
+
+model Outbox {
+  id          String   @id @default(cuid())
+  topic       String
+  eventKey    String?
+  payload     Json
+  createdAt   DateTime @default(now())
+  publishedAt DateTime?
+  attempts    Int      @default(0)
+  lastError   String?
+  
+  @@index([topic, createdAt])
+}

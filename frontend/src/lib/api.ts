@@ -118,3 +118,52 @@ export function getThread(parentId: string, cursor?: string, limit = 30) {
   if (limit) qs.set('limit', String(limit));
   return http(`/messages/thread/${parentId}${qs.toString() ? `?${qs.toString()}` : ''}`, { method: 'GET' });
 }
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+function uuidv4() {
+  // xài Web Crypto nếu có, fallback nếu không
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+// Gửi 1 lần cho mỗi key; tự retry khi server trả 409 (IN_PROGRESS)
+export async function sendMessageIdempotent(
+  userId: string,
+  payload: { conversationId: string; type: 'TEXT' | 'IMAGE' | 'FILE'; content?: string; parentId?: string },
+  opts: { key?: string; maxRetry?: number; backoffMs?: number } = {}
+) {
+  const key = opts.key || uuidv4();
+  const maxRetry = opts.maxRetry ?? 4;
+  let backoff = opts.backoffMs ?? 150;
+
+  // dùng httpRaw nếu bạn bật ở trên; còn không, dùng http hiện có và bắt message 409
+  for (let attempt = 0; attempt <= maxRetry; attempt++) {
+    try {
+      // nếu bạn đã có http() sẵn:
+      return await http(
+        '/messages',
+        { method: 'POST', body: JSON.stringify(payload), headers: { 'Idempotency-Key': key } },
+        userId
+      );
+      // nếu dùng httpRaw:
+      // return await httpRaw('/messages', { method: 'POST', body: JSON.stringify(payload), headers: { 'Idempotency-Key': key } }, userId);
+    } catch (e: any) {
+      const is409 =
+        (typeof e?.status === 'number' && e.status === 409) ||
+        (typeof e?.message === 'string' && e.message.includes('409'));
+
+      if (is409 && attempt < maxRetry) {
+        await sleep(backoff);
+        backoff *= 2;
+        continue;
+      }
+      throw e;
+    }
+  }
+}

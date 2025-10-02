@@ -8,12 +8,14 @@ import { SendMessageDto } from './dto/send-message.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { MessagingGateway } from 'src/websockets/messaging.gateway';
 import { UpdateMessageDto } from './dto/update-message.dto';
+import { OutboxProducer } from '../outbox/outbox.producer';
 
 @Injectable()
 export class MessagesService {
   constructor(
     private prisma: PrismaService,
     private gateway: MessagingGateway,
+    private outbox: OutboxProducer,
   ) {}
 
   async list(
@@ -70,9 +72,14 @@ export class MessagesService {
       }),
     ]);
 
-    // 🔔 Phát realtime tới room của conversation (đang xem)
-    this.gateway.emitToConversation(dto.conversationId, 'message.created', {
-      message: msg,
+    // // 🔔 Phát realtime tới room của conversation (đang xem)
+    // this.gateway.emitToConversation(dto.conversationId, 'message.created', {
+    //   message: msg,
+    // });
+    // 🔁 Thay vì phát WS ngay, ta ghi Outbox trong transaction riêng (hoặc dùng $transaction hiện tại nếu bạn wrap khác)
+    await this.outbox.emit('messaging.message_created', {
+      messageId: msg.id,
+      conversationId: dto.conversationId,
     });
 
     // 🔔 Phát "unread.bump" tới từng user member (không phải người gửi)
