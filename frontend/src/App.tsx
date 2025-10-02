@@ -10,8 +10,8 @@ import {
   listMessages,
   listUsers,
   sendMessage,
-  markRead,
-  getUnread,
+  updateMessage,
+  deleteMessage,
 } from './lib/api';
 import { realtime } from './lib/realtime';
 
@@ -44,13 +44,8 @@ export default function App() {
   const [apiUrl] = useState<string>(import.meta.env.VITE_API_URL || 'http://localhost:3000');
   const [peerPresence, setPeerPresence] = useState<{ online: boolean; lastSeen: string | null } | null>(null);
 
-  // 🔔 tránh trùng message khi event + optimistic
+  // chống trùng message khi event + optimistic
   const knownIdsRef = useRef<Set<string>>(new Set());
-
-  // 🔔 unread theo conversationId
-  const [unread, setUnread] = useState<Record<string, number>>({});
-  // 🔔 receipts: messageId -> userId[]
-  const [reads, setReads] = useState<Record<string, string[]>>({});
 
   const selectedConv = useMemo(
     () => conversations.find((c) => c.id === selectedConvId),
@@ -74,7 +69,6 @@ export default function App() {
     })();
   }, []);
 
-  // Load conversations + unread khi đổi user
   useEffect(() => {
     if (!currentUserId) return;
     (async () => {
@@ -83,26 +77,12 @@ export default function App() {
         const convs = await listConversations(currentUserId);
         setConversations(convs);
         if (convs.length && !selectedConvId) setSelectedConvId(convs[0].id);
-
-        // lấy unread cho từng convo
-        const entries = await Promise.all(
-          convs.map(async (c) => {
-            try {
-              const r = await getUnread(currentUserId, c.id);
-              return [c.id, r.unread] as const;
-            } catch {
-              return [c.id, 0] as const;
-            }
-          })
-        );
-        setUnread(Object.fromEntries(entries));
       } catch (e: any) {
         setError(e.message);
       }
     })();
   }, [currentUserId]);
 
-  // Load messages khi đổi room
   useEffect(() => {
     if (!selectedConvId) return;
     (async () => {
@@ -110,18 +90,9 @@ export default function App() {
         setLoading(true);
         setError('');
         const msgs = await listMessages(selectedConvId);
-        const ordered = [...msgs].reverse(); // oldest -> newest
+        const ordered = [...msgs].reverse();
         knownIdsRef.current = new Set(ordered.map((m) => m.id));
         setMessages(ordered);
-
-        // auto markRead tin mới nhất
-        const last = ordered[ordered.length - 1];
-        if (last && currentUserId) {
-          try {
-            await markRead(currentUserId, { conversationId: selectedConvId, messageId: last.id });
-            setUnread((m) => ({ ...m, [selectedConvId]: 0 }));
-          } catch {}
-        }
       } catch (e: any) {
         setError(e.message);
       } finally {
@@ -129,87 +100,6 @@ export default function App() {
       }
     })();
   }, [selectedConvId]);
-
-  // 🔔 Kết nối socket khi chọn currentUserId
-  useEffect(() => {
-    if (!currentUserId) return;
-    const s = realtime.connect(apiUrl, currentUserId);
-
-    const onCreated = async (e: any) => {
-      const m: Message | undefined = e?.message;
-      if (!m?.id) return;
-
-      if (m.conversationId === selectedConvId) {
-        // đang mở phòng này
-        if (!knownIdsRef.current.has(m.id)) {
-          knownIdsRef.current.add(m.id);
-          setMessages((prev) => [...prev, m]);
-        }
-        // nếu không phải mình gửi → markRead ngay
-        if (m.senderId !== currentUserId) {
-          try {
-            await markRead(currentUserId, { conversationId: m.conversationId, messageId: m.id });
-            setUnread((u) => ({ ...u, [m.conversationId]: 0 }));
-          } catch {}
-        }
-        // refresh danh sách (order)
-        listConversations(currentUserId).then(setConversations).catch(() => {});
-      } else {
-        // phòng khác → tăng unread nếu không phải tin của mình
-        if (m.senderId !== currentUserId) {
-          setUnread((u) => ({ ...u, [m.conversationId]: (u[m.conversationId] || 0) + 1 }));
-        }
-      }
-    };
-
-    const onReceipt = (e: any) => {
-      const { userId, messageId } = e || {};
-      if (!messageId || !userId) return;
-      setReads((prev) => {
-        const arr = prev[messageId] || [];
-        if (arr.includes(userId)) return prev;
-        return { ...prev, [messageId]: [...arr, userId] };
-      });
-    };
-
-     // 👇 NHẬN BUMP CHO PHÒNG KHÁC
-  const onUnread = (e: any) => {
-    const cid = e?.conversationId as string | undefined;
-    if (!cid) return;
-    // nếu phòng này đang mở thì bỏ qua (đã xử lý bằng markRead)
-    if (cid === selectedConvId) return;
-    setUnread(u => ({ ...u, [cid]: (u[cid] || 0) + 1 }));
-  };
-
-  // 👇 (tuỳ chọn) clear unread trên các tab cùng user khi markRead từ tab khác
-  const onUnreadClear = (e: any) => {
-    const cid = e?.conversationId as string | undefined;
-    if (!cid) return;
-    setUnread(u => ({ ...u, [cid]: 0 }));
-  };
-
-
-    s.on('message.created', onCreated);
-    s.on('receipt.read', onReceipt);
- s.on('unread.bump', onUnread);
-  s.on('unread.clear', onUnreadClear);
-    return () => {
-      s.off('message.created', onCreated);
-      s.off('receipt.read', onReceipt);
-      s.off('unread.bump', onUnread);
-    s.off('unread.clear', onUnreadClear);
-      realtime.disconnect();
-      knownIdsRef.current.clear();
-    };
-  }, [currentUserId, apiUrl, selectedConvId]);
-
-  // Khi chọn conversation → join room + reset unread
-  useEffect(() => {
-    if (!selectedConvId || !currentUserId) return;
-    realtime.joinConversation(selectedConvId);
-    knownIdsRef.current.clear();
-    setUnread((m) => ({ ...m, [selectedConvId]: 0 }));
-  }, [selectedConvId, currentUserId]);
 
   const onCreateUser = async (email: string, name?: string) => {
     const u = await createUser({ email, name });
@@ -225,8 +115,60 @@ export default function App() {
     const conv = await createConversation(currentUserId, payload);
     setConversations((prev) => [conv, ...prev]);
     setSelectedConvId(conv.id);
-    setUnread((m) => ({ ...m, [conv.id]: 0 }));
   };
+
+  // Kết nối socket
+  useEffect(() => {
+    if (!currentUserId) return;
+    const s = realtime.connect(apiUrl, currentUserId);
+
+    const onCreated = (e: any) => {
+      const m = e?.message;
+      if (!m?.id) return;
+      if (knownIdsRef.current.has(m.id)) return;
+      setMessages((prev) => {
+        if (!selectedConvId || m.conversationId !== selectedConvId) return prev;
+        knownIdsRef.current.add(m.id);
+        return [...prev, m];
+      });
+      listConversations(currentUserId).then(setConversations).catch(() => {});
+    };
+
+    // 👇 NEW: realtime edit
+    const onUpdated = (e: any) => {
+      const { id, content, editedAt } = e || {};
+      if (!id) return;
+      setMessages((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, content, editedAt } : m))
+      );
+    };
+
+    // 👇 NEW: realtime delete
+    const onDeleted = (e: any) => {
+      const { id } = e || {};
+      if (!id) return;
+      setMessages((prev) => prev.filter((m) => m.id !== id));
+    };
+
+    s.on('message.created', onCreated);
+    s.on('message.updated', onUpdated);
+    s.on('message.deleted', onDeleted);
+
+    return () => {
+      s.off('message.created', onCreated);
+      s.off('message.updated', onUpdated);
+      s.off('message.deleted', onDeleted);
+      realtime.disconnect();
+      knownIdsRef.current.clear();
+    };
+  }, [currentUserId, apiUrl, selectedConvId]);
+
+  // Join room khi chọn conversation
+  useEffect(() => {
+    if (!selectedConvId || !currentUserId) return;
+    realtime.joinConversation(selectedConvId);
+    knownIdsRef.current.clear();
+  }, [selectedConvId, currentUserId]);
 
   const onSend = async (text: string) => {
     if (!selectedConv) return;
@@ -248,7 +190,6 @@ export default function App() {
       });
       setMessages((prev) => prev.map((m) => (m.id === optimistic.id ? real : m)));
       knownIdsRef.current.add(real.id);
-      // refresh conv order
       const convs = await listConversations(currentUserId);
       setConversations(convs);
     } catch (e: any) {
@@ -280,6 +221,27 @@ export default function App() {
     };
   }, [selectedConv?.id, users.length, currentUserId]);
 
+  // Handlers edit/delete được truyền xuống MessagePane
+  const handleEdit = async (id: string, content: string) => {
+    try {
+      const updated = await updateMessage(currentUserId, id, { content });
+      setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...updated } : m)));
+    } catch (e: any) {
+      setError(e.message);
+      throw e;
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await deleteMessage(currentUserId, id);
+      setMessages((prev) => prev.filter((m) => m.id !== id));
+    } catch (e: any) {
+      setError(e.message);
+      throw e;
+    }
+  };
+
   return (
     <div className="h-screen grid grid-cols-[320px_1fr]">
       {/* Sidebar */}
@@ -289,13 +251,7 @@ export default function App() {
           <p className="text-xs text-gray-500">API: {apiUrl}</p>
         </div>
         <div className="p-4 space-y-4">
-          <UserSwitcher
-            users={users}
-            value={currentUserId}
-            onChange={setCurrentUserId}
-            onCreate={onCreateUser}
-          />
-
+          <UserSwitcher users={users} value={currentUserId} onChange={setCurrentUserId} onCreate={onCreateUser} />
           <NewConversationForm users={users} currentUserId={currentUserId} onCreate={onCreateConversation} />
         </div>
         <div className="px-4 py-2 text-xs text-gray-500">Conversations</div>
@@ -306,7 +262,6 @@ export default function App() {
             currentUserId={currentUserId}
             selectedId={selectedConvId}
             onSelect={setSelectedConvId}
-            unread={unread}
           />
         </div>
       </aside>
@@ -323,15 +278,11 @@ export default function App() {
                     : selectedConv.title || 'Untitled group'}
                 </div>
                 <div className="text-xs text-gray-500 truncate">
-                  <span className="mr-2">
-                    <Pill>{selectedConv.type}</Pill>
-                  </span>
+                  <span className="mr-2"><Pill>{selectedConv.type}</Pill></span>
                   {selectedConv.type === 'DIRECT' ? (
-                    peerPresence?.online ? (
-                      <span className="text-emerald-600">Online</span>
-                    ) : (
-                      <span>Last seen {peerPresence?.lastSeen ? new Date(peerPresence.lastSeen).toLocaleString() : '—'}</span>
-                    )
+                    peerPresence?.online
+                      ? <span className="text-emerald-600">Online</span>
+                      : <span>Last seen {peerPresence?.lastSeen ? new Date(peerPresence.lastSeen).toLocaleString() : '—'}</span>
                   ) : (
                     <span>{selectedConv.members.length} member(s)</span>
                   )}
@@ -351,9 +302,9 @@ export default function App() {
               currentUserId={currentUserId}
               messages={messages}
               loading={loading}
-              reads={reads}
-              users={users}
               onSend={onSend}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
             />
           ) : (
             <div className="h-full grid place-items-center text-gray-400">No conversation selected</div>
@@ -541,37 +492,27 @@ function ConversationList({
   currentUserId,
   selectedId,
   onSelect,
-  unread,
 }: {
   conversations: Conversation[];
   users: User[];
   currentUserId: string;
   selectedId: string;
   onSelect: (id: string) => void;
-  unread: Record<string, number>;
 }) {
   return (
     <div className="divide-y">
       {conversations.map((c) => {
         const isSelected = selectedId === c.id;
         const title = c.type === 'DIRECT' ? directTitle(c, users, currentUserId) : c.title || 'Untitled group';
-        const ucount = unread[c.id] || 0;
         return (
           <button
             key={c.id}
-            className={clsx('w-full text-left p-3 hover:bg-gray-50 relative', isSelected && 'bg-gray-100')}
+            className={clsx('w-full text-left p-3 hover:bg-gray-50', isSelected && 'bg-gray-100')}
             onClick={() => onSelect(c.id)}
           >
             <div className="flex items-center justify-between">
               <div className="font-medium truncate">{title}</div>
-              <div className="flex items-center gap-2">
-                {ucount > 0 && (
-                  <span className="min-w-5 h-5 px-2 rounded-full bg-emerald-600 text-white text-xs grid place-items-center">
-                    {ucount}
-                  </span>
-                )}
-                <div className="text-[10px] text-gray-500">{dayjs(c.updatedAt).format('HH:mm')}</div>
-              </div>
+              <div className="text-[10px] text-gray-500">{dayjs(c.updatedAt).format('HH:mm')}</div>
             </div>
             <div className="mt-1 text-xs text-gray-500 flex items-center gap-2">
               <Pill>{c.type}</Pill>
@@ -588,23 +529,56 @@ function MessagePane({
   currentUserId,
   messages,
   loading,
-  reads,
-  users,
   onSend,
+  onEdit,
+  onDelete,
 }: {
   currentUserId: string;
   messages: Message[];
   loading: boolean;
-  reads: Record<string, string[]>;
-  users: User[];
   onSend: (text: string) => Promise<void>;
+  onEdit: (id: string, content: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
 }) {
   const [text, setText] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState<string>('');
+  const [saving, setSaving] = useState<boolean>(false);
+
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [messages.length]);
+
+  const startEdit = (m: Message) => {
+    setEditingId(m.id);
+    setEditingText(m.content ?? '');
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditingText('');
+    setSaving(false);
+  };
+
+  const saveEdit = async () => {
+    if (!editingId) return;
+    const trimmed = editingText.trim();
+    if (!trimmed) return;
+    setSaving(true);
+    try {
+      await onEdit(editingId, trimmed);
+      cancelEdit();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const delMessage = async (id: string) => {
+    await onDelete(id);
+    if (editingId === id) cancelEdit();
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -612,36 +586,82 @@ function MessagePane({
         {loading && <div className="text-xs text-gray-500">Loading…</div>}
         {messages.map((m) => {
           const mine = m.senderId === currentUserId;
-          const readers = reads[m.id] || [];
-          const readersNames = readers
-            .map((uid) => users.find((u) => u.id === uid)?.name || users.find((u) => u.id === uid)?.email || uid)
-            .filter(Boolean);
+          const isEditing = editingId === m.id;
 
           return (
-            <div key={m.id} className={clsx('flex', mine ? 'justify-end' : 'justify-start')}>
-              <div
-                className={clsx(
-                  'max-w-[70%] rounded-2xl px-3 py-2 text-sm shadow',
-                  mine ? 'bg-gray-900 text-white rounded-br-sm' : 'bg-white border rounded-bl-sm'
+            <div key={m.id} className={clsx('flex group', mine ? 'justify-end' : 'justify-start')}>
+              <div className="relative">
+                {/* Actions (chỉ hiện với tin của mình) */}
+                {mine && !isEditing && (
+                  <div className="absolute -top-2 right-0 opacity-0 group-hover:opacity-100 transition">
+                    <div className="flex gap-1">
+                      <button
+                        className="text-[11px] px-2 py-0.5 rounded border bg-white hover:bg-gray-50"
+                        onClick={() => startEdit(m)}
+                        title="Edit"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="text-[11px] px-2 py-0.5 rounded border bg-white hover:bg-gray-50"
+                        onClick={() => delMessage(m.id)}
+                        title="Delete"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
                 )}
-              >
-                {m.content}
+
                 <div
                   className={clsx(
-                    'mt-1 text-[10px] flex items-center justify-between gap-4',
-                    mine ? 'text-gray-300' : 'text-gray-500'
+                    'max-w-[70%] rounded-2xl px-3 py-2 text-sm shadow',
+                    mine ? 'bg-gray-900 text-white rounded-br-sm' : 'bg-white border rounded-bl-sm'
                   )}
                 >
-                  <span>{dayjs(m.createdAt).format('HH:mm')}</span>
-                  {mine && readers.length > 0 && (
-                    <span className="inline-flex items-center gap-1">
-                      <span>✓ Read</span>
-                      <span className="text-[10px] opacity-80">
-                        {readersNames.length <= 2
-                          ? readersNames.join(', ')
-                          : `${readersNames.slice(0, 2).join(', ')} +${readersNames.length - 2}`}
-                      </span>
-                    </span>
+                  {!isEditing ? (
+                    <>
+                      <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                      <div
+                        className={clsx(
+                          'mt-1 text-[10px] flex items-center gap-2',
+                          mine ? 'text-gray-300' : 'text-gray-500'
+                        )}
+                      >
+                        <span>{dayjs(m.createdAt).format('HH:mm')}</span>
+                        {m.editedAt && <span className="opacity-80">· edited</span>}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <input
+                        autoFocus
+                        className={clsx(
+                          'flex-1 rounded-md px-2 py-1 text-sm',
+                          mine ? 'text-black bg-white' : 'bg-white'
+                        )}
+                        value={editingText}
+                        onChange={(e) => setEditingText(e.target.value)}
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter') await saveEdit();
+                          if (e.key === 'Escape') cancelEdit();
+                        }}
+                      />
+                      <button
+                        className="text-[11px] px-2 py-1 rounded bg-emerald-600 text-white disabled:opacity-50"
+                        disabled={saving || !editingText.trim()}
+                        onClick={saveEdit}
+                      >
+                        Save
+                      </button>
+                      <button
+                        className="text-[11px] px-2 py-1 rounded border bg-white"
+                        disabled={saving}
+                        onClick={cancelEdit}
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>

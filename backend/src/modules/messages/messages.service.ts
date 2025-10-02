@@ -1,7 +1,13 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  ForbiddenException,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { SendMessageDto } from './dto/send-message.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { MessagingGateway } from 'src/websockets/messaging.gateway';
+import { UpdateMessageDto } from './dto/update-message.dto';
 
 @Injectable()
 export class MessagesService {
@@ -64,5 +70,79 @@ export class MessagesService {
     });
 
     return msg;
+  }
+
+  async edit(userId: string, messageId: string, dto: UpdateMessageDto) {
+    if (!dto.content?.trim()) throw new BadRequestException('Content required');
+
+    const msg = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      select: {
+        id: true,
+        senderId: true,
+        conversationId: true,
+        deletedAt: true,
+      },
+    });
+    if (!msg) throw new NotFoundException('Message not found');
+
+    // chỉ cho chính người gửi sửa
+    if (msg.senderId !== userId)
+      throw new ForbiddenException('Only sender can edit');
+    if (msg.deletedAt) throw new BadRequestException('Message already deleted');
+
+    const updated = await this.prisma.message.update({
+      where: { id: messageId },
+      data: { content: dto.content, editedAt: new Date() },
+    });
+
+    this.gateway.emitToConversation(msg.conversationId, 'message.updated', {
+      id: updated.id,
+      content: updated.content,
+      editedAt: updated.editedAt,
+    });
+
+    return updated;
+  }
+
+  // ====== NEW: Soft delete ======
+  async softDelete(userId: string, messageId: string) {
+    const msg = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      select: {
+        id: true,
+        senderId: true,
+        conversationId: true,
+        deletedAt: true,
+      },
+    });
+    if (!msg) throw new NotFoundException('Message not found');
+    if (msg.deletedAt) return msg; // idempotent
+
+    // cho phép: chính sender hoặc member có role ADMIN/OWNER
+    const member = await this.prisma.conversationMember.findUnique({
+      where: {
+        conversationId_userId: { conversationId: msg.conversationId, userId },
+      },
+      select: { role: true },
+    });
+    if (!member) throw new ForbiddenException('Not a member');
+
+    const isSender = msg.senderId === userId;
+    const canAdmin = member.role === 'ADMIN' || member.role === 'OWNER';
+    if (!isSender && !canAdmin)
+      throw new ForbiddenException('No permission to delete');
+
+    const deleted = await this.prisma.message.update({
+      where: { id: messageId },
+      data: { deletedAt: new Date(), content: null }, // xóa nội dung hiển thị
+    });
+
+    this.gateway.emitToConversation(msg.conversationId, 'message.deleted', {
+      id: deleted.id,
+      deletedAt: deleted.deletedAt,
+    });
+
+    return deleted;
   }
 }

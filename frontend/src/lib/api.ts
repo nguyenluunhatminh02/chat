@@ -75,3 +75,20 @@ export function getUnread(
 ): Promise<{ conversationId: string; unread: number; since: string }> {
   return http(`/receipts/unread/${conversationId}`, { method: 'GET' }, userId);
 }
+
+// Update (edit) message
+export function updateMessage(
+  userId: string,
+  id: string,
+  data: { content: string }
+): Promise<import('../types').Message> {
+  return http(`/messages/${id}`, { method: 'PATCH', body: JSON.stringify(data) }, userId);
+}
+
+// Soft-delete message
+export function deleteMessage(
+  userId: string,
+  id: string
+): Promise<import('../types').Message> {
+  return http(`/messages/${id}`, { method: 'DELETE' }, userId);
+}
