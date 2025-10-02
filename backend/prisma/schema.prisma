@@ -69,25 +69,6 @@ enum MessageType {
   SYSTEM 
 }
 
-model Message {
-  id             String      @id @default(cuid())
-  conversationId String
-  senderId       String
-  type           MessageType @default(TEXT)
-  content        String?
-  parentId       String?     // reply/thread
-  metadata       Json?
-  editedAt       DateTime?
-  deletedAt      DateTime?
-  createdAt      DateTime    @default(now())
-
-  readReceipt ReadReceipt[]
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  // sender: chỉ cần lưu ID; nếu muốn relation đến User:
-  // sender       User         @relation(fields: [senderId], references: [id])
-
-  @@index([conversationId, createdAt])
-}
 
 model ReadReceipt {
   messageId String
@@ -98,4 +79,43 @@ model ReadReceipt {
 
   @@id([messageId, userId])
   @@index([userId])
+}
+
+model Message {
+  id             String      @id @default(cuid())
+  conversationId String
+  senderId       String
+  type           MessageType @default(TEXT)
+  content        String?
+  parentId       String?
+  metadata       Json?
+  editedAt       DateTime?
+  deletedAt      DateTime?
+  createdAt      DateTime    @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  // ✅ Thread self-relation
+  parent         Message?    @relation("Thread", fields: [parentId], references: [id])
+  replies        Message[]   @relation("Thread")
+  readReceipt ReadReceipt[]
+  reaction Reaction[]
+
+  // ✅ Index để load thread nhanh
+  @@index([conversationId, createdAt])
+  @@index([parentId, createdAt])
+}
+
+// --- NEW: Reaction ---
+model Reaction {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])   // mỗi user/emoji chỉ 1 lần trên 1 message
+  @@index([messageId])
 }

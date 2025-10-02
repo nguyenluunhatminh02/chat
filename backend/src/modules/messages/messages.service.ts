@@ -16,9 +16,16 @@ export class MessagesService {
     private gateway: MessagingGateway,
   ) {}
 
-  async list(conversationId: string, cursor?: string, limit = 30) {
+  async list(
+    conversationId: string,
+    cursor?: string,
+    limit = 30,
+    includeDeleted = true,
+  ) {
     return this.prisma.message.findMany({
-      where: { conversationId, deletedAt: null },
+      where: includeDeleted
+        ? { conversationId }
+        : { conversationId, deletedAt: null },
       orderBy: { createdAt: 'desc' },
       take: limit,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -34,6 +41,17 @@ export class MessagesService {
       select: { id: true },
     });
     if (!member) throw new ForbiddenException('Not a member');
+
+    // ✅ Nếu là reply thì kiểm tra parent hợp lệ
+    if (dto.parentId) {
+      const parent = await this.prisma.message.findUnique({
+        where: { id: dto.parentId },
+        select: { conversationId: true },
+      });
+      if (!parent || parent.conversationId !== dto.conversationId) {
+        throw new ForbiddenException('Invalid parent message');
+      }
+    }
 
     // Tạo message + cập nhật updatedAt của conversation để nổi lên đầu
     const [msg] = await this.prisma.$transaction([
@@ -70,6 +88,15 @@ export class MessagesService {
     });
 
     return msg;
+  }
+
+  async thread(parentId: string, cursor?: string, limit = 30) {
+    return await this.prisma.message.findMany({
+      where: { parentId, deletedAt: null },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
   }
 
   async edit(userId: string, messageId: string, dto: UpdateMessageDto) {

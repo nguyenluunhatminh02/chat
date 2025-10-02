@@ -22,8 +22,10 @@ export class MessagesController {
     @Param('conversationId') cid: string,
     @Query('cursor') cursor?: string,
     @Query('limit') limit = 30,
+    @Query('includeDeleted') includeDeleted = '1',
   ) {
-    return this.svc.list(cid, cursor, Number(limit));
+    const inc = includeDeleted === '1' || includeDeleted === 'true';
+    return this.svc.list(cid, cursor, Number(limit), inc);
   }
 
   @Post()
@@ -39,6 +41,16 @@ export class MessagesController {
     @Body() dto: UpdateMessageDto,
   ) {
     return this.svc.edit(userId, id, dto);
+  }
+
+  @Get('thread/:parentId')
+  thread(
+    @Param('parentId') parentId: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit = 30,
+  ) {
+    // trả theo thời gian tăng dần để hiển thị tự nhiên
+    return this.svc.thread(parentId, cursor, Number(limit));
   }
 
   // ====== NEW: Soft delete ======

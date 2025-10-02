@@ -12,6 +12,9 @@ import {
   sendMessage,
   updateMessage,
   deleteMessage,
+  listReactions,
+  toggleReaction,
+  getThread,
 } from './lib/api';
 import { realtime } from './lib/realtime';
 
@@ -32,6 +35,9 @@ const Pill = ({ children }: { children: React.ReactNode }) => (
   </span>
 );
 
+// A few common emojis for quick reactions
+const COMMON_EMOJIS = ['👍','❤️','😂','🎉','🔥','😮','😢','🙏'];
+
 export default function App() {
   const [users, setUsers] = useState<User[]>([]);
   const [currentUserId, setCurrentUserId] = useLocalStorage<string>('x-user-id', '');
@@ -46,6 +52,14 @@ export default function App() {
 
   // chống trùng message khi event + optimistic
   const knownIdsRef = useRef<Set<string>>(new Set());
+
+  // reactions: messageId -> emoji -> list of userIds
+  const [reactions, setReactions] = useState<Record<string, Record<string, string[]>>>({});
+
+  // thread state
+  const [openThreadId, setOpenThreadId] = useState<string | null>(null);
+  const [threadMap, setThreadMap] = useState<Record<string, Message[]>>({});
+  const [threadInput, setThreadInput] = useState<string>('');
 
   const selectedConv = useMemo(
     () => conversations.find((c) => c.id === selectedConvId),
@@ -89,10 +103,14 @@ export default function App() {
       try {
         setLoading(true);
         setError('');
-        const msgs = await listMessages(selectedConvId);
+        const msgs = await listMessages(selectedConvId, undefined, 30, true); // includeDeleted=1
         const ordered = [...msgs].reverse();
         knownIdsRef.current = new Set(ordered.map((m) => m.id));
         setMessages(ordered);
+        // clear thread + reactions cache for new room (optional)
+        setOpenThreadId(null);
+        setThreadMap({});
+        setReactions({});
       } catch (e: any) {
         setError(e.message);
       } finally {
@@ -123,51 +141,120 @@ export default function App() {
     const s = realtime.connect(apiUrl, currentUserId);
 
     const onCreated = (e: any) => {
-      const m = e?.message;
+      const m = e?.message as Message | undefined;
       if (!m?.id) return;
-      if (knownIdsRef.current.has(m.id)) return;
-      setMessages((prev) => {
-        if (!selectedConvId || m.conversationId !== selectedConvId) return prev;
-        knownIdsRef.current.add(m.id);
-        return [...prev, m];
-      });
-      listConversations(currentUserId).then(setConversations).catch(() => {});
+
+      if (m.conversationId === selectedConvId) {
+        // đang mở phòng này
+        if (!knownIdsRef.current.has(m.id)) {
+          knownIdsRef.current.add(m.id);
+          setMessages((prev) => [...prev, m]);
+        }
+        // nếu đang mở thread đúng parentId -> nhét vào thread
+        if (m.parentId && openThreadId === m.parentId) {
+          setThreadMap((prev) => {
+            const arr = prev[m.parentId!] || [];
+            const next = [...arr, m].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+            return { ...prev, [m.parentId!]: next };
+          });
+        }
+        // refresh danh sách (order)
+        listConversations(currentUserId).then(setConversations).catch(() => {});
+      }
     };
 
-    // 👇 NEW: realtime edit
+    // Realtime edit
     const onUpdated = (e: any) => {
       const { id, content, editedAt } = e || {};
       if (!id) return;
-      setMessages((prev) =>
-        prev.map((m) => (m.id === id ? { ...m, content, editedAt } : m))
-      );
+      setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, content, editedAt } : m)));
+      // nếu có trong threadMap thì cập nhật luôn
+      setThreadMap((prev) => {
+        const p = { ...prev };
+        Object.keys(p).forEach((pid) => {
+          p[pid] = p[pid].map((m) => (m.id === id ? { ...m, content, editedAt } : m));
+        });
+        return p;
+      });
     };
 
-    // 👇 NEW: realtime delete
+    // Realtime delete -> map thành placeholder
     const onDeleted = (e: any) => {
-      const { id } = e || {};
+      const { id, deletedAt } = e || {};
       if (!id) return;
-      setMessages((prev) => prev.filter((m) => m.id !== id));
+      setMessages((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, content: null, deletedAt: deletedAt || new Date().toISOString() } : m))
+      );
+      setThreadMap((prev) => {
+        const p = { ...prev };
+        Object.keys(p).forEach((pid) => {
+          p[pid] = p[pid].map((m) =>
+            m.id === id ? { ...m, content: null, deletedAt: deletedAt || new Date().toISOString() } : m
+          );
+        });
+        return p;
+      });
+      // (optional) clear reactions cache for deleted msg
+      setReactions((prev) => {
+        if (!prev[id]) return prev;
+        const { [id]: _, ...rest } = prev;
+        return rest;
+      });
+    };
+
+    // Realtime reaction added
+    const onReactionAdded = (e: any) => {
+      const { messageId, userId, emoji } = e || {};
+      if (!messageId || !emoji || !userId) return;
+      setReactions((prev) => {
+        const forMsg = prev[messageId] ? { ...prev[messageId] } : {};
+        const users = new Set(forMsg[emoji] || []);
+        users.add(userId);
+        forMsg[emoji] = Array.from(users);
+        return { ...prev, [messageId]: forMsg };
+      });
+    };
+
+    // Realtime reaction removed
+    const onReactionRemoved = (e: any) => {
+      const { messageId, userId, emoji } = e || {};
+      if (!messageId || !emoji || !userId) return;
+      setReactions((prev) => {
+        const forMsg = prev[messageId] ? { ...prev[messageId] } : {};
+        const arr = forMsg[emoji] || [];
+        const next = arr.filter((u) => u !== userId);
+        if (next.length === 0) {
+          // remove emoji key if empty
+          const { [emoji]: _drop, ...rest } = forMsg;
+          return { ...prev, [messageId]: rest };
+        }
+        return { ...prev, [messageId]: { ...forMsg, [emoji]: next } };
+      });
     };
 
     s.on('message.created', onCreated);
     s.on('message.updated', onUpdated);
     s.on('message.deleted', onDeleted);
+    s.on('reaction.added', onReactionAdded);
+    s.on('reaction.removed', onReactionRemoved);
 
     return () => {
       s.off('message.created', onCreated);
       s.off('message.updated', onUpdated);
       s.off('message.deleted', onDeleted);
+      s.off('reaction.added', onReactionAdded);
+      s.off('reaction.removed', onReactionRemoved);
       realtime.disconnect();
       knownIdsRef.current.clear();
     };
-  }, [currentUserId, apiUrl, selectedConvId]);
+  }, [currentUserId, apiUrl, selectedConvId, openThreadId]);
 
   // Join room khi chọn conversation
   useEffect(() => {
     if (!selectedConvId || !currentUserId) return;
     realtime.joinConversation(selectedConvId);
     knownIdsRef.current.clear();
+    setOpenThreadId(null);
   }, [selectedConvId, currentUserId]);
 
   const onSend = async (text: string) => {
@@ -221,11 +308,17 @@ export default function App() {
     };
   }, [selectedConv?.id, users.length, currentUserId]);
 
-  // Handlers edit/delete được truyền xuống MessagePane
   const handleEdit = async (id: string, content: string) => {
     try {
       const updated = await updateMessage(currentUserId, id, { content });
       setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...updated } : m)));
+      setThreadMap((prev) => {
+        const p = { ...prev };
+        Object.keys(p).forEach((pid) => {
+          p[pid] = p[pid].map((m) => (m.id === id ? { ...m, ...updated } : m));
+        });
+        return p;
+      });
     } catch (e: any) {
       setError(e.message);
       throw e;
@@ -233,12 +326,117 @@ export default function App() {
   };
 
   const handleDelete = async (id: string) => {
+    // optimistic -> show placeholder ngay
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, content: null, deletedAt: new Date().toISOString() } : m))
+    );
+    setThreadMap((prev) => {
+      const p = { ...prev };
+      Object.keys(p).forEach((pid) => {
+        p[pid] = p[pid].map((m) => (m.id === id ? { ...m, content: null, deletedAt: new Date().toISOString() } : m));
+      });
+      return p;
+    });
+
     try {
       await deleteMessage(currentUserId, id);
-      setMessages((prev) => prev.filter((m) => m.id !== id));
     } catch (e: any) {
       setError(e.message);
       throw e;
+    }
+  };
+
+  // Load reactions for a specific message lazily
+  const ensureReactions = async (messageId: string) => {
+    if (reactions[messageId]) return;
+    try {
+      const rows = await listReactions(messageId);
+      const grouped: Record<string, string[]> = {};
+      rows.forEach((r) => {
+        grouped[r.emoji] = grouped[r.emoji] || [];
+        grouped[r.emoji].push(r.userId);
+      });
+      setReactions((prev) => ({ ...prev, [messageId]: grouped }));
+    } catch {}
+  };
+
+  // Toggle reaction with optimistic update
+  const onToggleReact = async (messageId: string, emoji: string) => {
+    const byMe = (reactions[messageId]?.[emoji] || []).includes(currentUserId);
+    // optimistic
+    setReactions((prev) => {
+      const msgMap = prev[messageId] ? { ...prev[messageId] } : {};
+      const set = new Set(msgMap[emoji] || []);
+      if (byMe) set.delete(currentUserId);
+      else set.add(currentUserId);
+      const next = Array.from(set);
+      return { ...prev, [messageId]: { ...msgMap, [emoji]: next } };
+    });
+
+    try {
+      await toggleReaction(currentUserId, { messageId, emoji });
+    } catch {
+      // rollback if failed
+      setReactions((prev) => {
+        const msgMap = prev[messageId] ? { ...prev[messageId] } : {};
+        const set = new Set(msgMap[emoji] || []);
+        if (byMe) set.add(currentUserId);
+        else set.delete(currentUserId);
+        const next = Array.from(set);
+        return { ...prev, [messageId]: { ...msgMap, [emoji]: next } };
+      });
+    }
+  };
+
+  // Thread open/load & reply
+  const openThread = async (parentId: string) => {
+    setOpenThreadId((cur) => (cur === parentId ? null : parentId));
+    if (!threadMap[parentId]) {
+      try {
+        const rows = await getThread(parentId);
+        const ordered = [...rows].sort(
+          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
+        setThreadMap((prev) => ({ ...prev, [parentId]: ordered }));
+      } catch {}
+    }
+  };
+  const sendThreadReply = async (parentId: string, text: string) => {
+    if (!selectedConv) return;
+    const optimistic: Message = {
+      id: `tmp_t_${Date.now()}`,
+      conversationId: selectedConv.id,
+      senderId: currentUserId,
+      type: 'TEXT',
+      content: text,
+      parentId,
+      createdAt: new Date().toISOString(),
+    } as any;
+    setThreadMap((prev) => {
+      const arr = prev[parentId] || [];
+      return { ...prev, [parentId]: [...arr, optimistic] };
+    });
+    try {
+      const real = await sendMessage(currentUserId, {
+        conversationId: selectedConv.id,
+        type: 'TEXT',
+        content: text,
+        parentId,
+      });
+      setThreadMap((prev) => {
+        const arr = prev[parentId] || [];
+        return {
+          ...prev,
+          [parentId]: arr.map((m) => (m.id === optimistic.id ? real : m)),
+        };
+      });
+    } catch (e: any) {
+      setError(e.message);
+      // rollback
+      setThreadMap((prev) => {
+        const arr = prev[parentId] || [];
+        return { ...prev, [parentId]: arr.filter((m) => m.id !== optimistic.id) };
+      });
     }
   };
 
@@ -299,12 +497,22 @@ export default function App() {
           {selectedConv ? (
             <MessagePane
               key={selectedConv.id}
+              conversationId={selectedConv.id}
               currentUserId={currentUserId}
               messages={messages}
               loading={loading}
               onSend={onSend}
               onEdit={handleEdit}
               onDelete={handleDelete}
+              reactions={reactions}
+              ensureReactions={ensureReactions}
+              onToggleReact={onToggleReact}
+              openThreadId={openThreadId}
+              openThread={openThread}
+              threadMap={threadMap}
+              threadInput={threadInput}
+              setThreadInput={setThreadInput}
+              sendThreadReply={sendThreadReply}
             />
           ) : (
             <div className="h-full grid place-items-center text-gray-400">No conversation selected</div>
@@ -526,25 +734,44 @@ function ConversationList({
 }
 
 function MessagePane({
+  conversationId,
   currentUserId,
   messages,
   loading,
   onSend,
   onEdit,
   onDelete,
+  reactions,
+  ensureReactions,
+  onToggleReact,
+  openThreadId,
+  openThread,
+  threadMap,
+  threadInput,
+  setThreadInput,
+  sendThreadReply,
 }: {
+  conversationId: string;
   currentUserId: string;
   messages: Message[];
   loading: boolean;
   onSend: (text: string) => Promise<void>;
   onEdit: (id: string, content: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  reactions: Record<string, Record<string, string[]>>;
+  ensureReactions: (messageId: string) => Promise<void>;
+  onToggleReact: (messageId: string, emoji: string) => Promise<void>;
+  openThreadId: string | null;
+  openThread: (parentId: string) => Promise<void>;
+  threadMap: Record<string, Message[]>;
+  threadInput: string;
+  setThreadInput: (v: string) => void;
+  sendThreadReply: (parentId: string, text: string) => Promise<void>;
 }) {
   const [text, setText] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState<string>('');
   const [saving, setSaving] = useState<boolean>(false);
-
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -555,13 +782,11 @@ function MessagePane({
     setEditingId(m.id);
     setEditingText(m.content ?? '');
   };
-
   const cancelEdit = () => {
     setEditingId(null);
     setEditingText('');
     setSaving(false);
   };
-
   const saveEdit = async () => {
     if (!editingId) return;
     const trimmed = editingText.trim();
@@ -575,24 +800,23 @@ function MessagePane({
     }
   };
 
-  const delMessage = async (id: string) => {
-    await onDelete(id);
-    if (editingId === id) cancelEdit();
-  };
-
   return (
     <div className="h-full flex flex-col">
-      <div ref={listRef} className="flex-1 overflow-auto px-4 py-3 space-y-2">
+      <div ref={listRef} className="flex-1 overflow-auto px-4 py-3 space-y-3">
         {loading && <div className="text-xs text-gray-500">Loading…</div>}
         {messages.map((m) => {
           const mine = m.senderId === currentUserId;
           const isEditing = editingId === m.id;
+          const isDeleted = !!m.deletedAt;
+
+          const msgReactions = reactions[m.id] || {};
+          const sortedEmojis = Object.keys(msgReactions).sort();
 
           return (
             <div key={m.id} className={clsx('flex group', mine ? 'justify-end' : 'justify-start')}>
-              <div className="relative">
-                {/* Actions (chỉ hiện với tin của mình) */}
-                {mine && !isEditing && (
+              <div className="relative max-w-[70%]">
+                {/* Actions (chỉ hiện với tin của mình và chưa xóa) */}
+                {mine && !isEditing && !isDeleted && (
                   <div className="absolute -top-2 right-0 opacity-0 group-hover:opacity-100 transition">
                     <div className="flex gap-1">
                       <button
@@ -604,7 +828,7 @@ function MessagePane({
                       </button>
                       <button
                         className="text-[11px] px-2 py-0.5 rounded border bg-white hover:bg-gray-50"
-                        onClick={() => delMessage(m.id)}
+                        onClick={() => onDelete(m.id)}
                         title="Delete"
                       >
                         Delete
@@ -615,31 +839,41 @@ function MessagePane({
 
                 <div
                   className={clsx(
-                    'max-w-[70%] rounded-2xl px-3 py-2 text-sm shadow',
-                    mine ? 'bg-gray-900 text-white rounded-br-sm' : 'bg-white border rounded-bl-sm'
+                    'rounded-2xl px-3 py-2 text-sm shadow',
+                    mine ? 'bg-gray-900 text-white rounded-br-sm' : 'bg-white border rounded-bl-sm',
+                    isDeleted && 'opacity-80'
                   )}
+                  onMouseEnter={() => ensureReactions(m.id)}
                 >
                   {!isEditing ? (
-                    <>
-                      <div className="whitespace-pre-wrap break-words">{m.content}</div>
-                      <div
-                        className={clsx(
-                          'mt-1 text-[10px] flex items-center gap-2',
-                          mine ? 'text-gray-300' : 'text-gray-500'
-                        )}
-                      >
-                        <span>{dayjs(m.createdAt).format('HH:mm')}</span>
-                        {m.editedAt && <span className="opacity-80">· edited</span>}
-                      </div>
-                    </>
+                    !isDeleted ? (
+                      <>
+                        <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                        <div
+                          className={clsx(
+                            'mt-1 text-[10px] flex items-center gap-2',
+                            mine ? 'text-gray-300' : 'text-gray-500'
+                          )}
+                        >
+                          <span>{dayjs(m.createdAt).format('HH:mm')}</span>
+                          {m.editedAt && <span className="opacity-80">· edited</span>}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className={clsx('italic', mine ? 'text-white' : 'text-gray-600')}>
+                          Tin nhắn này đã bị xóa
+                        </div>
+                        <div className={clsx('mt-1 text-[10px]', mine ? 'text-gray-300' : 'text-gray-500')}>
+                          {dayjs(m.createdAt).format('HH:mm')}
+                        </div>
+                      </>
+                    )
                   ) : (
                     <div className="flex items-center gap-2">
                       <input
                         autoFocus
-                        className={clsx(
-                          'flex-1 rounded-md px-2 py-1 text-sm',
-                          mine ? 'text-black bg-white' : 'bg-white'
-                        )}
+                        className={clsx('flex-1 rounded-md px-2 py-1 text-sm', mine ? 'text-black bg-white' : 'bg-white')}
                         value={editingText}
                         onChange={(e) => setEditingText(e.target.value)}
                         onKeyDown={async (e) => {
@@ -654,16 +888,117 @@ function MessagePane({
                       >
                         Save
                       </button>
-                      <button
-                        className="text-[11px] px-2 py-1 rounded border bg-white"
-                        disabled={saving}
-                        onClick={cancelEdit}
-                      >
+                      <button className="text-[11px] px-2 py-1 rounded border bg-white" disabled={saving} onClick={cancelEdit}>
                         Cancel
                       </button>
                     </div>
                   )}
                 </div>
+
+                {/* Reactions row (ẩn nếu đã xóa) */}
+                {!isDeleted && (
+                  <div className={clsx('mt-1 flex flex-wrap items-center gap-1', mine ? 'justify-end' : 'justify-start')}>
+                    {sortedEmojis.map((emoji) => {
+                      const users = msgReactions[emoji] || [];
+                      const byMe = users.includes(currentUserId);
+                      const count = users.length;
+                      return (
+                        <button
+                          key={emoji}
+                          className={clsx(
+                            'px-2 h-6 rounded-full border text-xs bg-white',
+                            byMe ? 'border-emerald-600' : 'border-gray-300',
+                            'hover:bg-gray-50'
+                          )}
+                          onClick={() => onToggleReact(m.id, emoji)}
+                          title={byMe ? `You and ${count - 1} others` : `${count} reaction(s)`}
+                        >
+                          <span className="mr-1">{emoji}</span>
+                          <span>{count}</span>
+                        </button>
+                      );
+                    })}
+                    {/* Quick picker */}
+                    <ReactionPicker
+                      onPick={(emoji) => onToggleReact(m.id, emoji)}
+                      disabled={isDeleted}
+                    />
+                    {/* Reply */}
+                    <button
+                      className="ml-2 text-[11px] px-2 h-6 rounded-full border bg-white hover:bg-gray-50"
+                      onClick={() => openThread(m.id)}
+                      disabled={isDeleted}
+                    >
+                      Reply
+                    </button>
+                  </div>
+                )}
+
+                {/* Thread inline (nếu mở đúng message) */}
+                {openThreadId === m.id && (
+                  <div className="mt-2 border rounded-lg bg-gray-50">
+                    <div className="px-3 py-2 text-xs text-gray-600">Thread</div>
+                    <div className="max-h-56 overflow-auto px-3 pb-2 space-y-2">
+                      {(threadMap[m.id] || []).map((t) => {
+                        const mineT = t.senderId === currentUserId;
+                        const isDelT = !!t.deletedAt;
+                        return (
+                          <div key={t.id} className={clsx('flex', mineT ? 'justify-end' : 'justify-start')}>
+                            <div
+                              className={clsx(
+                                'max-w-[85%] rounded-2xl px-3 py-1.5 text-sm',
+                                mineT ? 'bg-gray-900 text-white rounded-br-sm' : 'bg-white border rounded-bl-sm',
+                                isDelT && 'opacity-80'
+                              )}
+                            >
+                              {!isDelT ? (
+                                <>
+                                  <div className="whitespace-pre-wrap break-words">{t.content}</div>
+                                  <div className={clsx('mt-1 text-[10px]', mineT ? 'text-gray-300' : 'text-gray-500')}>
+                                    {dayjs(t.createdAt).format('HH:mm')}
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <div className={clsx('italic', mineT ? 'text-white' : 'text-gray-600')}>
+                                    Tin nhắn này đã bị xóa
+                                  </div>
+                                  <div className={clsx('mt-1 text-[10px]', mineT ? 'text-gray-300' : 'text-gray-500')}>
+                                    {dayjs(t.createdAt).format('HH:mm')}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="border-t bg-white p-2 flex items-center gap-2">
+                      <input
+                        className="flex-1 rounded-full border-gray-300 px-3 py-1.5 text-sm"
+                        placeholder="Reply in thread…"
+                        value={threadInput}
+                        onChange={(e) => setThreadInput(e.target.value)}
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter' && threadInput.trim()) {
+                            await sendThreadReply(m.id, threadInput.trim());
+                            setThreadInput('');
+                          }
+                        }}
+                      />
+                      <button
+                        className="rounded-full bg-emerald-600 text-white px-3 py-1.5 text-sm disabled:opacity-50"
+                        disabled={!threadInput.trim()}
+                        onClick={async () => {
+                          await sendThreadReply(m.id, threadInput.trim());
+                          setThreadInput('');
+                        }}
+                      >
+                        Send
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -694,6 +1029,44 @@ function MessagePane({
           Send
         </button>
       </div>
+    </div>
+  );
+}
+
+function ReactionPicker({
+  onPick,
+  disabled,
+}: {
+  onPick: (emoji: string) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  if (disabled) return null;
+  return (
+    <div className="relative inline-block">
+      <button
+        className="px-2 h-6 rounded-full border text-xs bg-white hover:bg-gray-50"
+        onClick={() => setOpen((v) => !v)}
+        title="Add reaction"
+      >
+        +
+      </button>
+      {open && (
+        <div className="absolute z-10 mt-1 p-1 bg-white border rounded-lg shadow grid grid-cols-4 gap-1">
+          {COMMON_EMOJIS.map((e) => (
+            <button
+              key={e}
+              className="px-2 py-1 rounded hover:bg-gray-50"
+              onClick={() => {
+                onPick(e);
+                setOpen(false);
+              }}
+            >
+              {e}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

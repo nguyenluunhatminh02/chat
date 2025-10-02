@@ -38,12 +38,14 @@ export function createConversation(
 }
 
 // Messages
-export function listMessages(conversationId: string, cursor?: string, limit = 30): Promise<Message[]> {
+export function listMessages(conversationId: string, cursor?: string, limit = 30, includeDeleted = true) {
   const qs = new URLSearchParams();
   if (cursor) qs.set('cursor', cursor);
   if (limit) qs.set('limit', String(limit));
-  return http<Message[]>(`/messages/${conversationId}${qs.toString() ? `?${qs.toString()}` : ''}`, { method: 'GET' });
+  if (includeDeleted) qs.set('includeDeleted', '1');
+  return http(`/messages/${conversationId}${qs.toString() ? `?${qs.toString()}` : ''}`, { method: 'GET' });
 }
+
 export function sendMessage(
   userId: string,
   data: { conversationId: string; type: 'TEXT' | 'IMAGE' | 'FILE'; content?: string; parentId?: string }
@@ -91,4 +93,28 @@ export function deleteMessage(
   id: string
 ): Promise<import('../types').Message> {
   return http(`/messages/${id}`, { method: 'DELETE' }, userId);
+}
+
+
+// List reactions for a message
+export function listReactions(
+  messageId: string
+): Promise<Array<{ userId: string; emoji: string; createdAt: string }>> {
+  return http(`/reactions/${messageId}`, { method: 'GET' });
+}
+
+// Toggle reaction (add/remove)
+export function toggleReaction(
+  userId: string,
+  payload: { messageId: string; emoji: string }
+): Promise<{ added?: true; removed?: true }> {
+  return http('/reactions/toggle', { method: 'POST', body: JSON.stringify(payload) }, userId);
+}
+
+// Get thread (replies) of a parent message
+export function getThread(parentId: string, cursor?: string, limit = 30) {
+  const qs = new URLSearchParams();
+  if (cursor) qs.set('cursor', cursor);
+  if (limit) qs.set('limit', String(limit));
+  return http(`/messages/thread/${parentId}${qs.toString() ? `?${qs.toString()}` : ''}`, { method: 'GET' });
 }

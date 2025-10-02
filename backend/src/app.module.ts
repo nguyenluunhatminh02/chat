@@ -8,6 +8,7 @@ import { MessagesModule } from './modules/messages/messages.module';
 import { MessagingGateway } from './websockets/messaging.gateway';
 import { PresenceModule } from './modules/presence/presence.module';
 import { ReceiptsModule } from './modules/receipts/receipts.module';
+import { ReactionsModule } from './modules/reactions/reactions.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { ReceiptsModule } from './modules/receipts/receipts.module';
     MessagesModule,
     PresenceModule,
     ReceiptsModule,
+    ReactionsModule,
   ],
   providers: [MessagingGateway],
 })
