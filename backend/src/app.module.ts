@@ -10,6 +10,7 @@ import { PresenceModule } from './modules/presence/presence.module';
 import { ReceiptsModule } from './modules/receipts/receipts.module';
 import { ReactionsModule } from './modules/reactions/reactions.module';
 import { OutboxModule } from './modules/outbox/outbox.module';
+import { FilesModule } from './modules/files/files.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { OutboxModule } from './modules/outbox/outbox.module';
     ReceiptsModule,
     ReactionsModule,
     OutboxModule,
+    FilesModule,
   ],
   providers: [MessagingGateway],
 })

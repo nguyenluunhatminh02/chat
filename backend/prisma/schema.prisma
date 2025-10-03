@@ -100,6 +100,7 @@ model Message {
   replies        Message[]   @relation("Thread")
   readReceipt ReadReceipt[]
   reaction Reaction[]
+  attachment Attachment[]
 
   // ✅ Index để load thread nhanh
   @@index([conversationId, createdAt])
@@ -131,4 +132,41 @@ model Outbox {
   lastError   String?
   
   @@index([topic, createdAt])
+}
+
+enum FileStatus { 
+  UPLOADING 
+  READY 
+}
+
+model FileObject {
+  id        String     @id @default(cuid())
+  bucket    String
+  key       String
+  mime      String
+  size      Int?
+  checksum  String?
+  status    FileStatus @default(UPLOADING)
+  createdAt DateTime   @default(now())
+
+  attachments Attachment[]
+
+  // NEW
+  width     Int?
+  height    Int?
+  thumbKey  String?
+
+  @@unique([bucket, key])
+  @@index([status])
+}
+
+model Attachment {
+  id        String  @id @default(cuid())
+  messageId String
+  fileId    String
+
+  message   Message    @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  file      FileObject @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, fileId])
 }

@@ -1,3 +1,9 @@
+/* src/App.tsx
+ * Chat UI full: idempotent send + retry, realtime created/updated/deleted,
+ * reactions, reply thread (inline), presence, file upload (R2) with progress,
+ * placeholder cho tin đã xoá (không reaction/reply).
+ */
+
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import dayjs from 'dayjs';
 import clsx from 'classnames';
@@ -15,10 +21,15 @@ import {
   listReactions,
   toggleReaction,
   getThread,
+  filesComplete,
+  filesPresignGet,
+  filesPresignPut,
+  r2DirectPut,
+  filesCreateThumbnail,
 } from './lib/api';
 import { realtime } from './lib/realtime';
 
-/* ------------------------------ utilities ------------------------------ */
+/* ------------------------------ local utils ------------------------------ */
 
 function useLocalStorage<T>(key: string, initial: T) {
   const [value, setValue] = useState<T>(() => {
@@ -37,10 +48,7 @@ const Pill = ({ children }: { children: React.ReactNode }) => (
   </span>
 );
 
-// A few common emojis for quick reactions
 const COMMON_EMOJIS = ['👍', '❤️', '😂', '🎉', '🔥', '😮', '😢', '🙏'];
-
-/* --------------------------- pending send types -------------------------- */
 
 type SendPayload = {
   conversationId: string;
@@ -50,7 +58,89 @@ type SendPayload = {
 };
 type Pending = { key: string; status: 'sending' | 'failed'; attempts: number; payload: SendPayload };
 
-/* ---------------------------------- App --------------------------------- */
+/* ------------- file content helpers (stored in message.content) ---------- */
+
+type FileContent = {
+  fileId: string;
+  key: string;
+  filename: string;
+  mime: string;
+  size?: number;
+  url?: string;
+  thumbUrl?: string;
+};
+function buildFileContent(data: FileContent) {
+  return JSON.stringify(data);
+}
+function tryParseFileContent(content?: string | null): FileContent | null {
+  if (!content) return null;
+  try {
+    const v = JSON.parse(content);
+    if (v && typeof v === 'object' && v.fileId && v.key) return v as FileContent;
+  } catch {}
+  return null;
+}
+function humanSize(n?: number) {
+  if (!n) return '';
+  const u = ['B','KB','MB','GB','TB'];
+  let i = 0, x = n;
+  while (x >= 1024 && i < u.length - 1) { x /= 1024; i++; }
+  return `${x.toFixed(1)} ${u[i]}`;
+}
+
+/* ------------------------------- UploadBtn ------------------------------- */
+
+function UploadButton({
+  disabled,
+  onFiles,
+}: {
+  disabled?: boolean;
+  onFiles: (files: File[]) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  return (
+    <div
+      className={clsx('relative inline-flex items-center', dragOver && 'ring-2 ring-emerald-500 rounded-full')}
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault(); setDragOver(false);
+        const fs = Array.from(e.dataTransfer.files || []);
+        if (fs.length) onFiles(fs);
+      }}
+      onPaste={(e) => {
+        const items = Array.from(e.clipboardData.items || []);
+        const fs = items.filter(it => it.kind === 'file').map(it => it.getAsFile()).filter(Boolean) as File[];
+        if (fs.length) onFiles(fs);
+      }}
+    >
+      <button
+        type="button"
+        className="rounded-full border px-3 py-2 text-sm bg-white hover:bg-gray-50 disabled:opacity-50"
+        disabled={disabled}
+        onClick={() => inputRef.current?.click()}
+        title="Đính kèm (click/drag/paste)"
+      >
+        📎
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const fs = Array.from(e.target.files || []);
+          if (fs.length) onFiles(fs);
+          e.currentTarget.value = '';
+        }}
+      />
+    </div>
+  );
+}
+
+/* ---------------------------------- App ---------------------------------- */
 
 export default function App() {
   const [users, setUsers] = useState<User[]>([]);
@@ -69,16 +159,14 @@ export default function App() {
 
   // reactions: messageId -> emoji -> list of userIds
   const [reactions, setReactions] = useState<Record<string, Record<string, string[]>>>({});
-
   // reply count: parentId -> number
   const [replyCounts, setReplyCounts] = useState<Record<string, number>>({});
-
   // thread state
   const [openThreadId, setOpenThreadId] = useState<string | null>(null);
   const [threadMap, setThreadMap] = useState<Record<string, Message[]>>({});
   const [threadInput, setThreadInput] = useState<string>('');
 
-  // pending sends (persist) keyed by tmpId (optimistic bubble id)
+  // pending sends persisted
   const [pendingSends, setPendingSends] = useLocalStorage<Record<string, Pending>>('pending-sends', {});
 
   const selectedConv = useMemo(
@@ -92,7 +180,7 @@ export default function App() {
     return users.find((u) => u.id === otherId) || (otherId ? ({ id: otherId, email: otherId } as any) : null);
   }
 
-  /* --------------------------- initial bootstrap -------------------------- */
+  /* ----------------------------- bootstrap data ---------------------------- */
 
   useEffect(() => {
     (async () => {
@@ -124,7 +212,7 @@ export default function App() {
       try {
         setLoading(true);
         setError('');
-        const msgs = await listMessages(selectedConvId, undefined, 30, true); // includeDeleted=1
+        const msgs = await listMessages(selectedConvId, undefined, 30, true);
         const ordered = [...msgs].reverse();
         knownIdsRef.current = new Set(ordered.map((m) => m.id));
         setMessages(ordered);
@@ -142,7 +230,7 @@ export default function App() {
     })();
   }, [selectedConvId]);
 
-  /* ---------------------------- create entities --------------------------- */
+  /* ------------------------------- create things --------------------------- */
 
   const onCreateUser = async (email: string, name?: string) => {
     const u = await createUser({ email, name });
@@ -160,7 +248,7 @@ export default function App() {
     setSelectedConvId(conv.id);
   };
 
-  /* ------------------------------- realtime ------------------------------- */
+  /* -------------------------------- realtime -------------------------------- */
 
   // connect socket
   useEffect(() => {
@@ -170,28 +258,25 @@ export default function App() {
     const onCreated = (e: any) => {
       const m = e?.message as Message | undefined;
       if (!m?.id) return;
+      if (m.conversationId !== selectedConvId) return;
 
-      if (m.conversationId === selectedConvId) {
-        if (!knownIdsRef.current.has(m.id)) {
-          knownIdsRef.current.add(m.id);
-          setMessages((prev) => [...prev, m]);
-        }
-        // reply count bump if this is a reply
-        if (m.parentId) {
-          setReplyCounts((c) => ({ ...c, [m.parentId!]: (c[m.parentId!] || 0) + 1 }));
-          if (openThreadId === m.parentId) {
-            setThreadMap((prev) => {
-              const arr = prev[m.parentId!] || [];
-              const next = [...arr, m].sort(
-                (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-              );
-              return { ...prev, [m.parentId!]: next };
-            });
-          }
-        }
-        // refresh conv order
-        listConversations(currentUserId).then(setConversations).catch(() => {});
+      if (!knownIdsRef.current.has(m.id)) {
+        knownIdsRef.current.add(m.id);
+        setMessages((prev) => [...prev, m]);
       }
+      // reply counter
+      if (m.parentId) {
+        setReplyCounts((c) => ({ ...c, [m.parentId!]: (c[m.parentId!] || 0) + 1 }));
+        if (openThreadId === m.parentId) {
+          setThreadMap((prev) => {
+            const arr = prev[m.parentId!] || [];
+            const next = [...arr, m].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
+            return { ...prev, [m.parentId!]: next };
+          });
+        }
+      }
+      // reorder convs
+      listConversations(currentUserId).then(setConversations).catch(() => {});
     };
 
     const onUpdated = (e: any) => {
@@ -200,9 +285,9 @@ export default function App() {
       setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, content, editedAt } : m)));
       setThreadMap((prev) => {
         const p = { ...prev };
-        Object.keys(p).forEach((pid) => {
+        for (const pid of Object.keys(p)) {
           p[pid] = p[pid].map((m) => (m.id === id ? { ...m, content, editedAt } : m));
-        });
+        }
         return p;
       });
     };
@@ -215,20 +300,18 @@ export default function App() {
       );
       setThreadMap((prev) => {
         const p = { ...prev };
-        Object.keys(p).forEach((pid) => {
+        for (const pid of Object.keys(p)) {
           p[pid] = p[pid].map((m) =>
             m.id === id ? { ...m, content: null, deletedAt: deletedAt || new Date().toISOString() } : m
           );
-        });
+        }
         return p;
       });
-      // clear reactions cache for deleted msg
       setReactions((prev) => {
         if (!prev[id]) return prev;
         const { [id]: _drop, ...rest } = prev;
         return rest;
       });
-      // reply count decrease if this msg was a reply
       if (parentId) {
         setReplyCounts((c) => ({ ...c, [parentId]: Math.max(0, (c[parentId] || 0) - 1) }));
       }
@@ -261,19 +344,11 @@ export default function App() {
       });
     };
 
-    // optional: if you emit 'thread.count.bump' on backend
-    const onThreadBump = (e: any) => {
-      const { parentId, delta } = e || {};
-      if (!parentId || !delta) return;
-      setReplyCounts((c) => ({ ...c, [parentId]: Math.max(0, (c[parentId] || 0) + delta) }));
-    };
-
     s.on('message.created', onCreated);
     s.on('message.updated', onUpdated);
     s.on('message.deleted', onDeleted);
     s.on('reaction.added', onReactionAdded);
     s.on('reaction.removed', onReactionRemoved);
-    s.on('thread.count.bump', onThreadBump);
 
     return () => {
       s.off('message.created', onCreated);
@@ -281,7 +356,6 @@ export default function App() {
       s.off('message.deleted', onDeleted);
       s.off('reaction.added', onReactionAdded);
       s.off('reaction.removed', onReactionRemoved);
-      s.off('thread.count.bump', onThreadBump);
       realtime.disconnect();
       knownIdsRef.current.clear();
     };
@@ -295,9 +369,9 @@ export default function App() {
     setOpenThreadId(null);
   }, [selectedConvId, currentUserId]);
 
-  /* ---------------------------- idempotent send --------------------------- */
+  /* ---------------------------- idempotent send ---------------------------- */
 
-  // Retry a pending tmp bubble using same Idempotency-Key
+  // Retry pending bubble with same Idempotency-Key
   const retrySend = async (tmpId: string) => {
     const p = pendingSends[tmpId];
     if (!p) return;
@@ -316,7 +390,7 @@ export default function App() {
     }
   };
 
-  // Resume pending sends after reload
+  // Resume sending after reload
   useEffect(() => {
     Object.entries(pendingSends).forEach(([tmpId, v]) => {
       if (v.status === 'sending') retrySend(tmpId);
@@ -327,7 +401,6 @@ export default function App() {
   const onSend = async (text: string) => {
     if (!selectedConv) return;
 
-    // tmp bubble & idem key
     const tmpId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const idemKey = (crypto as any)?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
@@ -360,7 +433,7 @@ export default function App() {
     }
   };
 
-  /* ------------------------------ presence poll ------------------------------ */
+  /* ------------------------------ presence poll ---------------------------- */
 
   useEffect(() => {
     const peer = getDirectPeer(selectedConv, users, currentUserId);
@@ -384,23 +457,18 @@ export default function App() {
     };
   }, [selectedConv?.id, users.length, currentUserId]);
 
-  /* ------------------------------ edit / delete ------------------------------ */
+  /* ------------------------------ edit / delete ---------------------------- */
 
   const handleEdit = async (id: string, content: string) => {
-    try {
-      const updated = await updateMessage(currentUserId, id, { content });
-      setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...updated } : m)));
-      setThreadMap((prev) => {
-        const p = { ...prev };
-        Object.keys(p).forEach((pid) => {
-          p[pid] = p[pid].map((m) => (m.id === id ? { ...m, ...updated } : m));
-        });
-        return p;
+    const updated = await updateMessage(currentUserId, id, { content });
+    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...updated } : m)));
+    setThreadMap((prev) => {
+      const p = { ...prev };
+      Object.keys(p).forEach((pid) => {
+        p[pid] = p[pid].map((m) => (m.id === id ? { ...m, ...updated } : m));
       });
-    } catch (e: any) {
-      setError(e.message);
-      throw e;
-    }
+      return p;
+    });
   };
 
   const handleDelete = async (id: string) => {
@@ -416,22 +484,17 @@ export default function App() {
       return p;
     });
 
-    try {
-      await deleteMessage(currentUserId, id);
-    } catch (e: any) {
-      setError(e.message);
-      throw e;
-    }
+    await deleteMessage(currentUserId, id);
   };
 
-  /* ------------------------------ reactions ------------------------------ */
+  /* -------------------------------- reactions ------------------------------ */
 
   const ensureReactions = async (messageId: string) => {
     if (reactions[messageId]) return;
     try {
       const rows = await listReactions(messageId);
       const grouped: Record<string, string[]> = {};
-      rows.forEach((r) => {
+      rows.forEach((r: any) => {
         grouped[r.emoji] = grouped[r.emoji] || [];
         grouped[r.emoji].push(r.userId);
       });
@@ -440,6 +503,10 @@ export default function App() {
   };
 
   const onToggleReact = async (messageId: string, emoji: string) => {
+    // block if deleted
+    const msg = messages.find((m) => m.id === messageId);
+    if (msg?.deletedAt) return;
+
     const byMe = (reactions[messageId]?.[emoji] || []).includes(currentUserId);
     // optimistic
     setReactions((prev) => {
@@ -447,8 +514,7 @@ export default function App() {
       const set = new Set(msgMap[emoji] || []);
       if (byMe) set.delete(currentUserId);
       else set.add(currentUserId);
-      const next = Array.from(set);
-      return { ...prev, [messageId]: { ...msgMap, [emoji]: next } };
+      return { ...prev, [messageId]: { ...msgMap, [emoji]: Array.from(set) } };
     });
 
     try {
@@ -460,8 +526,7 @@ export default function App() {
         const set = new Set(msgMap[emoji] || []);
         if (byMe) set.add(currentUserId);
         else set.delete(currentUserId);
-        const next = Array.from(set);
-        return { ...prev, [messageId]: { ...msgMap, [emoji]: next } };
+        return { ...prev, [messageId]: { ...msgMap, [emoji]: Array.from(set) } };
       });
     }
   };
@@ -473,19 +538,15 @@ export default function App() {
     if (!threadMap[parentId]) {
       try {
         const rows = await getThread(parentId);
-        const ordered = [...rows].sort(
-          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-        );
+        const ordered = [...rows].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
         setThreadMap((prev) => ({ ...prev, [parentId]: ordered }));
-        // sync reply count from server data (not counting deleted)
-        setReplyCounts((c) => ({ ...c, [parentId]: ordered.filter((r) => !r.deletedAt).length }));
+        setReplyCounts((c) => ({ ...c, [parentId]: ordered.filter((r: any) => !r.deletedAt).length }));
       } catch {}
     }
   };
 
   const sendThreadReply = async (parentId: string, text: string) => {
     if (!selectedConv) return;
-    // Reuse sending pipeline with idempotent? For brevity, do a lightweight optimistic + sendMessageIdempotent:
     const tmpId = `tmp_t_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const idemKey = (crypto as any)?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
@@ -504,15 +565,12 @@ export default function App() {
       return { ...prev, [parentId]: [...arr, optimistic] };
     });
 
-    const payload: SendPayload = {
-      conversationId: selectedConv.id,
-      type: 'TEXT',
-      content: text,
-      parentId,
-    };
-
     try {
-      const real = await sendMessageIdempotent(currentUserId, payload, { key: idemKey });
+      const real = await sendMessageIdempotent(
+        currentUserId,
+        { conversationId: selectedConv.id, type: 'TEXT', content: text, parentId },
+        { key: idemKey }
+      );
       setThreadMap((prev) => {
         const arr = prev[parentId] || [];
         return { ...prev, [parentId]: arr.map((m) => (m.id === tmpId ? real : m)) };
@@ -520,13 +578,72 @@ export default function App() {
       setReplyCounts((c) => ({ ...c, [parentId]: (c[parentId] || 0) + 1 }));
     } catch (e: any) {
       setError(e.message);
-      // rollback
       setThreadMap((prev) => {
         const arr = prev[parentId] || [];
         return { ...prev, [parentId]: arr.filter((m) => m.id !== tmpId) };
       });
     }
   };
+
+  /* ------------------------------ attach files ----------------------------- */
+
+  // App.tsx – bên trong function App()
+const onAttachFiles = async (files: File[]) => {
+  if (!selectedConv || !currentUserId) return;
+
+  for (const file of files) {
+    try {
+      // 1) Xin presigned PUT
+      const presign = await filesPresignPut(file.name, file.type || 'application/octet-stream', file.size);
+
+      // 2) Upload trực tiếp lên R2 (có thể hiện tiến độ nếu muốn)
+      // setUploadingPercents((p)=>({...p, [presign.fileId]: 0}))
+      await r2DirectPut(presign, file, /* (p)=> setUploadingPercents(...p) */);
+
+      // 3) Hoàn tất → BE mark READY + sniff mime
+      const completed = await filesComplete(presign.fileId);
+
+      // 4) Presign GET url ảnh/file gốc
+      const { url } = await filesPresignGet(completed.key);
+
+      // 5) Nếu là ảnh, tạo thumbnail (nhanh & nhẹ cho UI)
+      let thumbUrl: string | undefined;
+      if ((completed.mime || file.type).startsWith('image/')) {
+        try {
+          const t = await filesCreateThumbnail(presign.fileId, 512);
+          thumbUrl = t.thumbUrl;
+        } catch { /* thumbnail lỗi thì bỏ qua, dùng url gốc */ }
+      }
+
+      // 6) Gửi message kiểu IMAGE/FILE với payload JSON
+      const isImage = (completed.mime || file.type).startsWith('image/');
+      const payload = {
+        fileId: presign.fileId,
+        key: completed.key,
+        filename: file.name,
+        mime: completed.mime || file.type,
+        size: completed.size,
+        url,
+        thumbUrl,
+      };
+      const idemKey = (crypto as any).randomUUID?.() || String(Date.now());
+      const msg = await sendMessageIdempotent(currentUserId, {
+        conversationId: selectedConv.id,
+        type: isImage ? 'IMAGE' : 'FILE',
+        content: JSON.stringify(payload),
+      }, { key: idemKey });
+
+      // để tránh trùng với event realtime
+      knownIdsRef.current.add(msg.id);
+      setMessages(prev => [...prev, msg]);
+    } catch (e: any) {
+      setError(e.message || 'Upload failed');
+    } finally {
+      // setUploadingPercents((p)=>{ const x={...p}; delete x[presign.fileId]; return x; })
+    }
+  }
+};
+
 
   return (
     <div className="h-screen grid grid-cols-[320px_1fr]">
@@ -564,17 +681,12 @@ export default function App() {
                     : selectedConv.title || 'Untitled group'}
                 </div>
                 <div className="text-xs text-gray-500 truncate">
-                  <span className="mr-2">
-                    <Pill>{selectedConv.type}</Pill>
-                  </span>
+                  <span className="mr-2"><Pill>{selectedConv.type}</Pill></span>
                   {selectedConv.type === 'DIRECT' ? (
                     peerPresence?.online ? (
                       <span className="text-emerald-600">Online</span>
                     ) : (
-                      <span>
-                        Last seen{' '}
-                        {peerPresence?.lastSeen ? new Date(peerPresence.lastSeen).toLocaleString() : '—'}
-                      </span>
+                      <span>Last seen {peerPresence?.lastSeen ? new Date(peerPresence.lastSeen).toLocaleString() : '—'}</span>
                     )
                   ) : (
                     <span>{selectedConv.members.length} member(s)</span>
@@ -597,6 +709,7 @@ export default function App() {
               messages={messages}
               loading={loading}
               onSend={onSend}
+              onAttachFiles={onAttachFiles}
               onEdit={handleEdit}
               onDelete={handleDelete}
               reactions={reactions}
@@ -621,7 +734,7 @@ export default function App() {
   );
 }
 
-/* ------------------------------ small helpers ----------------------------- */
+/* -------------------------------- helpers -------------------------------- */
 
 function directTitle(conv: Conversation, users: User[], me: string) {
   const other = conv.members.map((m) => m.userId).find((id) => id !== me);
@@ -629,7 +742,7 @@ function directTitle(conv: Conversation, users: User[], me: string) {
   return u ? u.name || u.email : other || 'DIRECT';
 }
 
-/* ------------------------------- components ------------------------------- */
+/* ------------------------------ subcomponents ----------------------------- */
 
 function UserSwitcher({
   users,
@@ -710,10 +823,7 @@ function NewConversationForm({
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    setSelected([]);
-  }, [type]);
-
+  useEffect(() => { setSelected([]); }, [type]);
   const candidates = users.filter((u) => u.id !== currentUserId);
 
   return (
@@ -721,19 +831,13 @@ function NewConversationForm({
       <label className="text-sm font-medium">New conversation</label>
       <div className="flex gap-2 text-sm">
         <button
-          className={clsx(
-            'px-2 py-1 rounded-md border',
-            type === 'DIRECT' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white'
-          )}
+          className={clsx('px-2 py-1 rounded-md border', type === 'DIRECT' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white')}
           onClick={() => setType('DIRECT')}
         >
           DIRECT
         </button>
         <button
-          className={clsx(
-            'px-2 py-1 rounded-md border',
-            type === 'GROUP' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white'
-          )}
+          className={clsx('px-2 py-1 rounded-md border', type === 'GROUP' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white')}
           onClick={() => setType('GROUP')}
         >
           GROUP
@@ -783,8 +887,7 @@ function NewConversationForm({
           setBusy(true);
           try {
             await onCreate({ type, title: title || undefined, members: selected });
-            setSelected([]);
-            setTitle('');
+            setSelected([]); setTitle('');
           } finally {
             setBusy(false);
           }
@@ -841,6 +944,7 @@ function MessagePane({
   messages,
   loading,
   onSend,
+  onAttachFiles,
   onEdit,
   onDelete,
   reactions,
@@ -861,6 +965,7 @@ function MessagePane({
   messages: Message[];
   loading: boolean;
   onSend: (text: string) => Promise<void>;
+  onAttachFiles: (files: File[]) => Promise<void>;
   onEdit: (id: string, content: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   reactions: Record<string, Record<string, string[]>>;
@@ -916,38 +1021,28 @@ function MessagePane({
           const mine = m.senderId === currentUserId;
           const isEditing = editingId === m.id;
           const isDeleted = !!m.deletedAt;
-
           const isTmp = m.id.startsWith('tmp_');
           const pending = isTmp ? pendingSends[m.id] : undefined;
           const isSending = pending?.status === 'sending';
           const isFailed = pending?.status === 'failed';
 
+          const filePayload = tryParseFileContent(m.content);
+          const isImage = m.type === 'IMAGE';
+          const isFile = m.type === 'FILE';
+
           const msgReactions = reactions[m.id] || {};
           const sortedEmojis = Object.keys(msgReactions).sort();
-
           const replyCount = replyCounts[m.id] || 0;
 
           return (
             <div key={m.id} className={clsx('flex group', mine ? 'justify-end' : 'justify-start')}>
               <div className="relative max-w-[70%]">
-                {/* Actions (only owner & not deleted) */}
+                {/* Actions (owner & not deleted) */}
                 {mine && !isEditing && !isDeleted && (
                   <div className="absolute -top-2 right-0 opacity-0 group-hover:opacity-100 transition">
                     <div className="flex gap-1">
-                      <button
-                        className="text-[11px] px-2 py-0.5 rounded border bg-white hover:bg-gray-50"
-                        onClick={() => startEdit(m)}
-                        title="Edit"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        className="text-[11px] px-2 py-0.5 rounded border bg-white hover:bg-gray-50"
-                        onClick={() => onDelete(m.id)}
-                        title="Delete"
-                      >
-                        Delete
-                      </button>
+                      <button className="text-[11px] px-2 py-0.5 rounded border bg-white hover:bg-gray-50" onClick={() => startEdit(m)}>Edit</button>
+                      <button className="text-[11px] px-2 py-0.5 rounded border bg-white hover:bg-gray-50" onClick={() => onDelete(m.id)}>Delete</button>
                     </div>
                   </div>
                 )}
@@ -963,24 +1058,50 @@ function MessagePane({
                   {!isEditing ? (
                     !isDeleted ? (
                       <>
-                        <div className="whitespace-pre-wrap break-words">{m.content}</div>
-                        <div
-                          className={clsx(
-                            'mt-1 text-[10px] flex items-center gap-2',
-                            mine ? 'text-gray-300' : 'text-gray-500'
-                          )}
-                        >
+                        {/* IMAGE / FILE / TEXT */}
+                        {isImage && filePayload ? (
+                          <a href={filePayload.url} target="_blank" rel="noreferrer" className="block">
+                            <img
+                              src={filePayload.thumbUrl || filePayload.url}
+                              alt={filePayload.filename}
+                              className="max-h-72 rounded-lg"
+                              style={{ objectFit: 'cover' }}
+                            />
+                            <div className={clsx('mt-1 text-[11px]', mine ? 'text-gray-200' : 'text-gray-600')}>
+                              {filePayload.filename} {filePayload.size ? `· ${humanSize(filePayload.size)}` : ''}
+                            </div>
+                          </a>
+                        ) : isFile && filePayload ? (
+                          <a href={filePayload.url} target="_blank" rel="noreferrer" className="block">
+                            <div className={clsx('rounded-md p-2', mine ? 'bg-gray-800' : 'bg-gray-50 border')}>
+                              <div className="text-sm truncate">{filePayload.filename}</div>
+                              <div className={clsx('text-[11px] mt-0.5', mine ? 'text-gray-300' : 'text-gray-500')}>
+                                {filePayload.mime} · {humanSize(filePayload.size)}
+                              </div>
+                              <div className={clsx('text-[11px] underline mt-1', mine ? 'text-emerald-300' : 'text-emerald-700')}>
+                                Tải xuống
+                              </div>
+                            </div>
+                          </a>
+                        ) : (
+                          <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                        )}
+
+                        {/* Meta line */}
+                        <div className={clsx('mt-1 text-[10px] flex items-center gap-2', mine ? 'text-gray-300' : 'text-gray-500')}>
                           <span>{dayjs(m.createdAt).format('HH:mm')}</span>
                           {m.editedAt && <span className="opacity-80">· edited</span>}
                           {isTmp && isSending && <span className="opacity-80">· Đang gửi…</span>}
                           {isTmp && isFailed && (
-                            <button
-                              className={clsx('underline', mine ? 'text-rose-200' : 'text-rose-600')}
-                              onClick={() => retrySend(m.id)}
-                              title="Gửi lại"
-                            >
+                            <button className={clsx('underline', mine ? 'text-rose-200' : 'text-rose-600')} onClick={() => retrySend(m.id)}>
                               · Không gửi được — Thử lại
                             </button>
+                          )}
+                          {(m as any)._uploading && <span className="opacity-80">· Đang tải lên… {(m as any)._progress ?? 0}%</span>}
+                          {(m as any)._uploadError && (
+                            <span className={clsx('opacity-90', mine ? 'text-rose-200' : 'text-rose-600')}>
+                              · Tải lên thất bại — Chọn lại file để gửi
+                            </span>
                           )}
                         </div>
                       </>
@@ -1006,48 +1127,35 @@ function MessagePane({
                           if (e.key === 'Escape') cancelEdit();
                         }}
                       />
-                      <button
-                        className="text-[11px] px-2 py-1 rounded bg-emerald-600 text-white disabled:opacity-50"
-                        disabled={saving || !editingText.trim()}
-                        onClick={saveEdit}
-                      >
-                        Save
-                      </button>
-                      <button className="text-[11px] px-2 py-1 rounded border bg-white" disabled={saving} onClick={cancelEdit}>
-                        Cancel
-                      </button>
+                      <button className="text-[11px] px-2 py-1 rounded bg-emerald-600 text-white disabled:opacity-50" disabled={saving || !editingText.trim()} onClick={saveEdit}>Save</button>
+                      <button className="text-[11px] px-2 py-1 rounded border bg-white" disabled={saving} onClick={cancelEdit}>Cancel</button>
                     </div>
                   )}
                 </div>
 
-                {/* Reactions + Reply (hidden if deleted) */}
+                {/* Reactions + Reply (ẩn nếu deleted) */}
                 {!isDeleted && (
                   <div className={clsx('mt-1 flex flex-wrap items-center gap-1', mine ? 'justify-end' : 'justify-start')}>
-                    {sortedEmojis.map((emoji) => {
+                    {Object.keys(msgReactions).sort().map((emoji) => {
                       const users = msgReactions[emoji] || [];
                       const byMe = users.includes(currentUserId);
                       const count = users.length;
                       return (
                         <button
                           key={emoji}
-                          className={clsx(
-                            'px-2 h-6 rounded-full border text-xs bg-white',
-                            byMe ? 'border-emerald-600' : 'border-gray-300',
-                            'hover:bg-gray-50'
-                          )}
+                          className={clsx('px-2 h-6 rounded-full border text-xs bg-white', byMe ? 'border-emerald-600' : 'border-gray-300', 'hover:bg-gray-50')}
                           onClick={() => onToggleReact(m.id, emoji)}
-                          title={byMe ? `You and ${count - 1} others` : `${count} reaction(s)`}
+                          title={byMe ? `You and ${Math.max(0, count - 1)} others` : `${count} reaction(s)`}
                         >
                           <span className="mr-1">{emoji}</span>
                           <span>{count}</span>
                         </button>
                       );
                     })}
-                    <ReactionPicker onPick={(emoji) => onToggleReact(m.id, emoji)} disabled={isDeleted} />
+                    <ReactionPicker onPick={(emoji) => onToggleReact(m.id, emoji)} />
                     <button
                       className="ml-2 text-[11px] px-2 h-6 rounded-full border bg-white hover:bg-gray-50"
                       onClick={() => openThread(m.id)}
-                      disabled={isDeleted}
                       title="Open thread"
                     >
                       {replyCount > 0 ? `Reply · ${replyCount}` : 'Reply'}
@@ -1065,13 +1173,7 @@ function MessagePane({
                         const isDelT = !!t.deletedAt;
                         return (
                           <div key={t.id} className={clsx('flex', mineT ? 'justify-end' : 'justify-start')}>
-                            <div
-                              className={clsx(
-                                'max-w-[85%] rounded-2xl px-3 py-1.5 text-sm',
-                                mineT ? 'bg-gray-900 text-white rounded-br-sm' : 'bg-white border rounded-bl-sm',
-                                isDelT && 'opacity-80'
-                              )}
-                            >
+                            <div className={clsx('max-w-[85%] rounded-2xl px-3 py-1.5 text-sm', mineT ? 'bg-gray-900 text-white rounded-br-sm' : 'bg-white border rounded-bl-sm', isDelT && 'opacity-80')}>
                               {!isDelT ? (
                                 <>
                                   <div className="whitespace-pre-wrap break-words">{t.content}</div>
@@ -1081,12 +1183,8 @@ function MessagePane({
                                 </>
                               ) : (
                                 <>
-                                  <div className={clsx('italic', mineT ? 'text-white' : 'text-gray-600')}>
-                                    Tin nhắn này đã bị xóa
-                                  </div>
-                                  <div className={clsx('mt-1 text-[10px]', mineT ? 'text-gray-300' : 'text-gray-500')}>
-                                    {dayjs(t.createdAt).format('HH:mm')}
-                                  </div>
+                                  <div className={clsx('italic', mineT ? 'text-white' : 'text-gray-600')}>Tin nhắn này đã bị xóa</div>
+                                  <div className={clsx('mt-1 text-[10px]', mineT ? 'text-gray-300' : 'text-gray-500')}>{dayjs(t.createdAt).format('HH:mm')}</div>
                                 </>
                               )}
                             </div>
@@ -1126,7 +1224,9 @@ function MessagePane({
         })}
       </div>
 
+      {/* Input bar */}
       <div className="border-t bg-white p-3 flex items-center gap-2">
+        <UploadButton onFiles={onAttachFiles} />
         <input
           className="flex-1 rounded-full border-gray-300 px-4 py-2 text-sm"
           placeholder="Type a message…"
@@ -1154,15 +1254,8 @@ function MessagePane({
   );
 }
 
-function ReactionPicker({
-  onPick,
-  disabled,
-}: {
-  onPick: (emoji: string) => void;
-  disabled?: boolean;
-}) {
+function ReactionPicker({ onPick }: { onPick: (emoji: string) => void }) {
   const [open, setOpen] = useState(false);
-  if (disabled) return null;
   return (
     <div className="relative inline-block">
       <button

@@ -5,7 +5,7 @@ import { MessagingGateway } from 'src/websockets/messaging.gateway';
 import { PresenceService } from '../presence/presence.service';
 
 @Module({
-  providers: [OutboxProducer, OutboxRelay, MessagingGateway,PresenceService],
+  providers: [OutboxProducer, OutboxRelay, MessagingGateway, PresenceService],
   exports: [OutboxProducer],
 })
 export class OutboxModule {}
