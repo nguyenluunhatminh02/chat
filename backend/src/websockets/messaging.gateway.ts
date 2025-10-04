@@ -19,17 +19,15 @@ export class MessagingGateway
   constructor(private presence: PresenceService) {}
 
   async handleConnection(client: Socket) {
-    // Nhận userId từ handshake.auth.userId (client gửi lên)
     const userId = client.handshake.auth?.userId;
     if (!userId) return client.disconnect(true);
     await this.presence.heartbeat(userId);
-    client.join(`u:${userId}`); // room riêng cho user nếu cần
+    client.join(`u:${userId}`);
   }
 
   async handleDisconnect(client: Socket) {
     const userId = client.handshake.auth?.userId as string | undefined;
     if (userId) await this.presence.setLastSeen(userId);
-    // có thể log/cleanup nếu cần
   }
 
   @SubscribeMessage('join.conversation')
@@ -42,7 +40,6 @@ export class MessagingGateway
     client.join(`c:${cid}`);
   }
 
-  // Heartbeat qua WS (thay cho REST nếu muốn)
   @SubscribeMessage('presence.heartbeat')
   async wsHeartbeat(@MessageBody() _b: any, @ConnectedSocket() client: Socket) {
     const userId = client.handshake.auth?.userId as string | undefined;

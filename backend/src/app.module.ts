@@ -11,10 +11,21 @@ import { ReceiptsModule } from './modules/receipts/receipts.module';
 import { ReactionsModule } from './modules/reactions/reactions.module';
 import { OutboxModule } from './modules/outbox/outbox.module';
 import { FilesModule } from './modules/files/files.module';
+import { SearchModule } from './modules/search/search.module';
+import { BullModule } from '@nestjs/bullmq';
+import { WebsocketsModule } from './websockets/websockets.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    BullModule.forRoot({
+      prefix: process.env.BULL_PREFIX || 'app',
+      connection: {
+        host: process.env.REDIS_HOST,
+        port: Number(process.env.REDIS_PORT || 6379),
+        password: process.env.REDIS_PASSWORD || undefined,
+      },
+    }),
     PrismaModule,
     HealthModule,
     UsersModule,
@@ -25,7 +36,8 @@ import { FilesModule } from './modules/files/files.module';
     ReactionsModule,
     OutboxModule,
     FilesModule,
+    SearchModule,
+    WebsocketsModule,
   ],
-  providers: [MessagingGateway],
 })
 export class AppModule {}

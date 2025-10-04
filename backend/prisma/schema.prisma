@@ -128,10 +128,14 @@ model Outbox {
   payload     Json
   createdAt   DateTime @default(now())
   publishedAt DateTime?
+    claimedAt   DateTime?
+  claimedBy   String?
   attempts    Int      @default(0)
   lastError   String?
-  
+
+  @@index([publishedAt, claimedAt, createdAt])
   @@index([topic, createdAt])
+  @@unique([topic, eventKey])
 }
 
 enum FileStatus { 

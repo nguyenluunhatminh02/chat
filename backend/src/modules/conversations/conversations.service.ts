@@ -32,11 +32,53 @@ export class ConversationsService {
     return conv;
   }
 
-  listForUser(userId: string) {
-    return this.prisma.conversation.findMany({
+  async listForUser(userId: string) {
+    const conversations = await this.prisma.conversation.findMany({
       where: { members: { some: { userId } } },
       orderBy: { updatedAt: 'desc' },
       include: { members: true },
     });
+
+    // Fetch last message for each conversation
+    const conversationsWithLastMessage = await Promise.all(
+      conversations.map(async (conv) => {
+        const lastMessage = await this.prisma.message.findFirst({
+          where: {
+            conversationId: conv.id,
+            deletedAt: null,
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (!lastMessage) {
+          return { ...conv, lastMessage: null };
+        }
+
+        // Fetch user info separately
+        const user = await this.prisma.user.findUnique({
+          where: { id: lastMessage.senderId },
+          select: {
+            id: true,
+            email: true,
+            name: true,
+          },
+        });
+
+        return {
+          ...conv,
+          lastMessage: {
+            content: lastMessage.content,
+            createdAt: lastMessage.createdAt.toISOString(),
+            user: user || {
+              id: lastMessage.senderId,
+              email: 'Unknown',
+              name: null,
+            },
+          },
+        };
+      }),
+    );
+
+    return conversationsWithLastMessage;
   }
 }

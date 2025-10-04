@@ -1,12 +1,10 @@
-// src/lib/api.ts
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 function http(path: string, init?: RequestInit) {
   const url = path.startsWith('http') ? path : `${BASE}${path}`;
   return fetch(url, init);
 }
-
-async function json<T = any>(res: Response): Promise<T> {
+async function json<T = unknown>(res: Response): Promise<T> {
   if (!res.ok) {
     const txt = await res.text().catch(() => '');
     throw new Error(txt || `HTTP ${res.status}`);
@@ -50,7 +48,7 @@ export async function listMessages(conversationId: string, cursor?: string, limi
   const qs = new URLSearchParams();
   if (cursor) qs.set('cursor', cursor);
   if (limit) qs.set('limit', String(limit));
-  if (includeDeleted) qs.set('includeDeleted', '1'); // BE đang filter deletedAt=null; tham số này chỉ để tương thích
+  if (includeDeleted) qs.set('includeDeleted', '1');
   const res = await http(`/messages/${conversationId}?${qs.toString()}`);
   return json(res);
 }
@@ -128,7 +126,6 @@ export async function toggleReaction(userId: string, body: { messageId: string; 
 }
 
 /* ========== Files (Cloudflare R2 – Presigned PUT) ========== */
-/** Xin presigned PUT từ BE (R2 khuyên dùng) */
 export async function filesPresignPut(filename: string, mime: string, sizeMax?: number) {
   const res = await http('/files/presign-put', {
     method: 'POST',
@@ -140,7 +137,6 @@ export async function filesPresignPut(filename: string, mime: string, sizeMax?: 
   }>(res);
 }
 
-/** Upload trực tiếp lên R2 bằng XHR để track progress (%) */
 export function r2DirectPut(
   presign: { url: string },
   file: File,
@@ -160,7 +156,6 @@ export function r2DirectPut(
   });
 }
 
-/** Thông báo hoàn tất để BE HEAD/sniff & mark READY */
 export async function filesComplete(fileId: string) {
   const res = await http('/files/complete', {
     method: 'POST',
@@ -172,7 +167,6 @@ export async function filesComplete(fileId: string) {
   }>(res);
 }
 
-/** Yêu cầu BE tạo thumbnail (JPEG) và trả thumbUrl presigned */
 export async function filesCreateThumbnail(fileId: string, maxSize = 512) {
   const res = await http('/files/thumbnail', {
     method: 'POST',
@@ -182,9 +176,59 @@ export async function filesCreateThumbnail(fileId: string, maxSize = 512) {
   return json<{ thumbUrl: string; thumbKey?: string }>(res);
 }
 
-/** Xin presigned GET cho object private */
 export async function filesPresignGet(key: string, expiresIn = 600) {
   const qs = new URLSearchParams({ key, expiresIn: String(expiresIn) });
   const res = await http(`/files/presign-get?${qs.toString()}`);
   return json<{ url: string }>(res);
+}
+
+/* ========== Search (Meilisearch) ========== */
+export type SearchHit = {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  type: string;
+  content: string | null;
+  createdAt: string;
+  highlight?: string | null;
+};
+
+export async function searchMessages(
+  q: string,
+  opts: { conversationId?: string; limit?: number; offset?: number } = {},
+) {
+  const params = new URLSearchParams();
+  params.set('q', q);
+  if (opts.conversationId) params.set('conversationId', opts.conversationId);
+  if (opts.limit != null) params.set('limit', String(opts.limit));
+  if (opts.offset != null) params.set('offset', String(opts.offset));
+
+  const res = await http('/search/messages?' + params.toString(), {
+    headers: { 'Content-Type': 'application/json' },
+  });
+  return json<{
+    query: string;
+    limit: number;
+    offset: number;
+    estimatedTotalHits: number;
+    hits: SearchHit[];
+  }>(res);
+}
+
+/** NEW: lấy “cửa sổ” tin nhắn quanh 1 message (jump around) */
+export async function getMessagesAround(
+  userId: string,
+  messageId: string,
+  before = 20,
+  after = 20,
+) {
+  const res = await http(
+    `/messages/around/${encodeURIComponent(messageId)}?before=${before}&after=${after}`,
+    { headers: { 'Content-Type': 'application/json', 'X-User-Id': userId } }
+  );
+  return json<{
+    conversationId: string;
+    anchorId: string;
+    messages: unknown[];
+  }>(res);
 }

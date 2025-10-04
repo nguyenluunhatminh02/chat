@@ -58,4 +58,16 @@ export class MessagesController {
   delete(@UserId() userId: string, @Param('id') id: string) {
     return this.svc.softDelete(userId, id);
   }
+
+  @Get('around/:messageId')
+  around(
+    @UserId() userId: string,
+    @Param('messageId') messageId: string,
+    @Query('before') before?: string,
+    @Query('after') after?: string,
+  ) {
+    const b = before ? Number(before) : 20;
+    const a = after ? Number(after) : 20;
+    return this.svc.around(userId, messageId, b, a);
+  }
 }

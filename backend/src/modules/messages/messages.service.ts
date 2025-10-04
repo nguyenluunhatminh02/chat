@@ -84,14 +84,21 @@ export class MessagesService {
 
     // 🔔 Phát "unread.bump" tới từng user member (không phải người gửi)
     //  -> để các tab không đang mở phòng đó vẫn tăng unread realtime
-    const members = await this.prisma.conversationMember.findMany({
-      where: { conversationId: dto.conversationId },
-      select: { userId: true },
-    });
-    const others = members.map((m) => m.userId).filter((id) => id !== userId);
-    this.gateway.emitToUsers(others, 'unread.bump', {
+    // const members = await this.prisma.conversationMember.findMany({
+    //   where: { conversationId: dto.conversationId },
+    //   select: { userId: true },
+    // });
+    // const others = members.map((m) => m.userId).filter((id) => id !== userId);
+    // this.gateway.emitToUsers(others, 'unread.bump', {
+    //   conversationId: dto.conversationId,
+    //   messageId: msg.id,
+    // });
+
+    // 2) outbox cho "unread.bump" (thay vì emit trực tiếp)
+    await this.outbox.emit('messaging.unread_bump', {
       conversationId: dto.conversationId,
       messageId: msg.id,
+      excludeUserId: userId, // không bắn về người gửi
     });
 
     return msg;
@@ -136,6 +143,11 @@ export class MessagesService {
       editedAt: updated.editedAt,
     });
 
+    // NEW: outbox cho search
+    await this.outbox.emit('messaging.message_updated', {
+      messageId: updated.id,
+    });
+
     return updated;
   }
 
@@ -177,6 +189,68 @@ export class MessagesService {
       deletedAt: deleted.deletedAt,
     });
 
+    // NEW: outbox cho search
+    await this.outbox.emit('messaging.message_deleted', {
+      messageId: deleted.id,
+    });
+
     return deleted;
+  }
+
+  /**
+   * Lấy cửa sổ tin nhắn quanh 1 messageId (bao gồm cả tin đã xoá để hiện placeholder).
+   * Trả theo thứ tự thời gian tăng dần.
+   */
+  async around(userId: string, messageId: string, before = 20, after = 20) {
+    const anchor = await this.prisma.message.findUnique({
+      where: { id: messageId },
+    });
+    if (!anchor) throw new NotFoundException('Message not found');
+
+    // an toàn: chỉ thành viên convo đó được xem
+    const member = await this.prisma.conversationMember.findUnique({
+      where: {
+        conversationId_userId: {
+          conversationId: anchor.conversationId,
+          userId,
+        },
+      },
+      select: { id: true },
+    });
+    if (!member) throw new ForbiddenException('Not a member');
+
+    // NOTE: KHÔNG lọc deletedAt để FE có thể render "Tin nhắn đã bị xoá"
+    const beforeRows = await this.prisma.message.findMany({
+      where: {
+        conversationId: anchor.conversationId,
+        OR: [
+          { createdAt: { lt: anchor.createdAt } },
+          { createdAt: anchor.createdAt, id: { lt: anchor.id } }, // tie-break
+        ],
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: Math.max(0, before),
+    });
+
+    const afterRows = await this.prisma.message.findMany({
+      where: {
+        conversationId: anchor.conversationId,
+        OR: [
+          { createdAt: { gt: anchor.createdAt } },
+          { createdAt: anchor.createdAt, id: { gt: anchor.id } },
+        ],
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: Math.max(0, after),
+    });
+
+    const beforeAsc = beforeRows.slice().reverse();
+    const messages = [...beforeAsc, anchor, ...afterRows];
+
+    return {
+      conversationId: anchor.conversationId,
+      anchorId: anchor.id,
+      messages,
+    };
   }
 }

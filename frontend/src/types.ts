@@ -29,6 +29,11 @@ export type Conversation = {
   createdAt: string;
   updatedAt: string;
   members: ConversationMember[];
+  lastMessage?: {
+    content: string;
+    createdAt: string;
+    user: User;
+  } | null;
 };
 
 export type MessageType = 'TEXT' | 'IMAGE' | 'FILE' | 'SYSTEM';

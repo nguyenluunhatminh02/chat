@@ -4,7 +4,7 @@ import { createClient, RedisClientType } from 'redis';
 @Injectable()
 export class PresenceService implements OnModuleInit, OnModuleDestroy {
   private r: RedisClientType;
-  private ttlSec = 60; // client nên heartbeat ~30–45s
+  private ttlSec = 60; // client heartbeat ~30–45s
 
   constructor() {
     this.r = createClient({ url: process.env.REDIS_URL });

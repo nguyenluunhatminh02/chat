@@ -1,0 +1,53 @@
+### Meili health (kiểm tra container up)
+GET http://localhost:7700/health
+Authorization: Bearer meili_master
+
+### ------------------------------------------------------------
+### Variables
+@base = http://localhost:3000
+@conv = convA
+@msg1 = m1
+@msg2 = m2
+@t1 = 2025-10-03T07:40:00.000Z
+@t2 = 2025-10-03T07:40:01.000Z
+
+### ------------------------------------------------------------
+### Index message 1
+POST {{base}}/search/index
+Content-Type: application/json
+
+{
+  "id": "{{msg1}}",
+  "conversationId": "{{conv}}",
+  "senderId": "u1",
+  "type": "TEXT",
+  "content": "hello meili world",
+  "createdAt": "{{t1}}"
+}
+
+### Index message 2
+POST {{base}}/search/index
+Content-Type: application/json
+
+{
+  "id": "{{msg2}}",
+  "conversationId": "{{conv}}",
+  "senderId": "u2",
+  "type": "TEXT",
+  "content": "another message about cats and meili",
+  "createdAt": "{{t2}}"
+}
+
+### ------------------------------------------------------------
+### Search "meili" trong convA (có highlight + sort theo createdAt desc)
+GET {{base}}/search/messages?q=meili&conversationId={{conv}}&limit=10
+
+### Search toàn bộ (không filter conversation)
+GET {{base}}/search/messages?q=meili&limit=10
+
+### ------------------------------------------------------------
+### Xoá message 1 khỏi index
+DELETE {{base}}/search/{{msg1}}
+
+### Verify: tìm "hello" trong convA (không còn m1)
+GET {{base}}/search?q=hello&conversationId={{conv}}&limit=10
