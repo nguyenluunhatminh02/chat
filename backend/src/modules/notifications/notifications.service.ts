@@ -47,6 +47,10 @@ export class NotificationsService {
    * Send push notifications to offline members when a new message is created
    */
   async fanoutNewMessage(conversationId: string, messageId: string) {
+    this.logger.log(
+      `🔔 Fanout notification: conv=${conversationId}, msg=${messageId}`,
+    );
+
     try {
       // 1. Get message details
       const message = await this.prisma.message.findUnique({
@@ -65,6 +69,10 @@ export class NotificationsService {
         this.logger.warn(`Message ${messageId} not found`);
         return;
       }
+
+      this.logger.log(
+        `Message from ${message.senderId}: ${message.content?.substring(0, 50)}`,
+      );
 
       // 2. Get all members of the conversation
       const members = await this.prisma.conversationMember.findMany({
@@ -91,19 +99,25 @@ export class NotificationsService {
         .map((m) => m.userId)
         .filter((id) => id !== message.senderId);
 
+      this.logger.log(`Other members: ${otherMembers.join(', ') || 'none'}`);
+
       // 6. Send push to each offline member
       for (const userId of otherMembers) {
         // Check if user is online
         const isOnline = await this.presence.isOnline(userId);
+        this.logger.log(`User ${userId} online status: ${isOnline}`);
+
         if (isOnline) {
-          this.logger.debug(`User ${userId} is online, skipping push`);
+          this.logger.log(`User ${userId} is online, skipping push`);
           continue;
         }
 
         // Check throttle
         const should = await this.shouldNotify(userId, conversationId);
+        this.logger.log(`User ${userId} throttle check: ${should}`);
+
         if (!should) {
-          this.logger.debug(
+          this.logger.warn(
             `User ${userId} throttled for conversation ${conversationId}`,
           );
           continue;

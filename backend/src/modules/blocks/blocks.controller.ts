@@ -30,4 +30,28 @@ export class BlocksController {
   ) {
     return this.svc.unblock(userId, blockedUserId);
   }
+
+  @Get('check/:otherUserId')
+  async checkBlockStatus(
+    @UserId() userId: string,
+    @Param('otherUserId') otherUserId: string,
+  ) {
+    const blocked = await this.svc.isBlockedEither(userId, otherUserId);
+
+    if (!blocked) {
+      return { blocked: false, direction: 'none' };
+    }
+
+    // Check who blocked whom
+    const iBlockThem = await this.svc.isBlocked(userId, otherUserId);
+    const theyBlockMe = await this.svc.isBlocked(otherUserId, userId);
+
+    if (iBlockThem && theyBlockMe) {
+      return { blocked: true, direction: 'mutual' };
+    } else if (iBlockThem) {
+      return { blocked: true, direction: 'blocker' };
+    } else {
+      return { blocked: true, direction: 'blocked' };
+    }
+  }
 }

@@ -129,6 +129,12 @@ export class MessagesService {
       excludeUserId: userId, // không bắn về người gửi
     });
 
+    // 3) 🔔 NEW: Emit notification job for push notifications
+    await this.outbox.emit('notifications.new_message', {
+      conversationId: dto.conversationId,
+      messageId: msg.id,
+    });
+
     return msg;
   }
 

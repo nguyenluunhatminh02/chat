@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Push Notification Debug</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 { color: #333; }
+    .section {
+      background: white;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 10px 0;
+    }
+    .status-icon {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+    }
+    .status-icon.ok { background: #22c55e; }
+    .status-icon.error { background: #ef4444; }
+    .status-icon.warn { background: #f59e0b; }
+    button {
+      background: #3b82f6;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      margin: 5px;
+    }
+    button:hover { background: #2563eb; }
+    button:disabled {
+      background: #9ca3af;
+      cursor: not-allowed;
+    }
+    pre {
+      background: #f9fafb;
+      padding: 15px;
+      border-radius: 6px;
+      overflow-x: auto;
+      font-size: 12px;
+    }
+    .error { color: #ef4444; }
+    .success { color: #22c55e; }
+  </style>
+</head>
+<body>
+  <h1>🔔 Push Notification Debug</h1>
+
+  <div class="section">
+    <h2>System Support</h2>
+    <div id="support-status"></div>
+  </div>
+
+  <div class="section">
+    <h2>Permission Status</h2>
+    <div id="permission-status"></div>
+    <button id="request-permission">Request Permission</button>
+  </div>
+
+  <div class="section">
+    <h2>Service Worker</h2>
+    <div id="sw-status"></div>
+    <button id="register-sw">Register Service Worker</button>
+    <button id="unregister-sw">Unregister All</button>
+  </div>
+
+  <div class="section">
+    <h2>Push Subscription</h2>
+    <div id="subscription-status"></div>
+    <button id="subscribe-push">Subscribe to Push</button>
+    <button id="unsubscribe-push">Unsubscribe</button>
+    <button id="test-notification">Test Local Notification</button>
+  </div>
+
+  <div class="section">
+    <h2>Subscription Details</h2>
+    <pre id="subscription-details">No subscription</pre>
+  </div>
+
+  <script>
+    const BASE_URL = 'http://localhost:3000';
+    const userId = localStorage.getItem('x-user-id');
+
+    function status(type, text) {
+      return `<div class="status"><div class="status-icon ${type}"></div><span>${text}</span></div>`;
+    }
+
+    async function checkSupport() {
+      const el = document.getElementById('support-status');
+      let html = '';
+
+      html += status('serviceWorker' in navigator ? 'ok' : 'error', 
+        `Service Worker: ${'serviceWorker' in navigator ? 'Supported ✓' : 'Not Supported ✗'}`);
+      
+      html += status('PushManager' in window ? 'ok' : 'error',
+        `Push Manager: ${'PushManager' in window ? 'Supported ✓' : 'Not Supported ✗'}`);
+      
+      html += status('Notification' in window ? 'ok' : 'error',
+        `Notifications: ${'Notification' in window ? 'Supported ✓' : 'Not Supported ✗'}`);
+
+      html += status(userId ? 'ok' : 'warn',
+        `User ID: ${userId || 'Not logged in (go to chat page first)'}`);
+
+      el.innerHTML = html;
+    }
+
+    async function checkPermission() {
+      const el = document.getElementById('permission-status');
+      const perm = Notification.permission;
+      
+      let type = 'warn';
+      if (perm === 'granted') type = 'ok';
+      if (perm === 'denied') type = 'error';
+
+      el.innerHTML = status(type, `Permission: ${perm}`);
+    }
+
+    async function checkServiceWorker() {
+      const el = document.getElementById('sw-status');
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      
+      let html = '';
+      if (registrations.length === 0) {
+        html = status('warn', 'No service workers registered');
+      } else {
+        registrations.forEach((reg, i) => {
+          html += status('ok', `SW ${i + 1}: ${reg.scope} (${reg.active ? 'Active' : 'Inactive'})`);
+        });
+      }
+      el.innerHTML = html;
+    }
+
+    async function checkSubscription() {
+      const el = document.getElementById('subscription-status');
+      const detailsEl = document.getElementById('subscription-details');
+      
+      try {
+        const registration = await navigator.serviceWorker.getRegistration('/');
+        if (!registration) {
+          el.innerHTML = status('warn', 'No service worker registered');
+          return;
+        }
+
+        const subscription = await registration.pushManager.getSubscription();
+        if (!subscription) {
+          el.innerHTML = status('warn', 'Not subscribed to push');
+          detailsEl.textContent = 'No subscription';
+          return;
+        }
+
+        el.innerHTML = status('ok', 'Subscribed to push ✓');
+        detailsEl.textContent = JSON.stringify(subscription.toJSON(), null, 2);
+      } catch (error) {
+        el.innerHTML = status('error', `Error: ${error.message}`);
+      }
+    }
+
+    document.getElementById('request-permission').onclick = async () => {
+      const result = await Notification.requestPermission();
+      alert(`Permission: ${result}`);
+      checkPermission();
+    };
+
+    document.getElementById('register-sw').onclick = async () => {
+      try {
+        const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+        alert('Service Worker registered!');
+        await checkServiceWorker();
+        await checkSubscription();
+      } catch (error) {
+        alert('Error: ' + error.message);
+      }
+    };
+
+    document.getElementById('unregister-sw').onclick = async () => {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      for (const reg of registrations) {
+        await reg.unregister();
+      }
+      alert('All service workers unregistered');
+      await checkServiceWorker();
+      await checkSubscription();
+    };
+
+    document.getElementById('subscribe-push').onclick = async () => {
+      if (!userId) {
+        alert('Please log in first (go to chat page)');
+        return;
+      }
+
+      try {
+        // Get public key
+        const res = await fetch(`${BASE_URL}/push/public-key`);
+        const { publicKey } = await res.json();
+
+        // Register SW
+        const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+        await navigator.serviceWorker.ready;
+
+        // Subscribe
+        const subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey),
+        });
+
+        // Send to server
+        await fetch(`${BASE_URL}/push/subscribe`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-User-Id': userId,
+          },
+          body: JSON.stringify({ subscription: subscription.toJSON() }),
+        });
+
+        alert('Subscribed successfully!');
+        await checkSubscription();
+      } catch (error) {
+        alert('Error: ' + error.message);
+        console.error(error);
+      }
+    };
+
+    document.getElementById('unsubscribe-push').onclick = async () => {
+      try {
+        const registration = await navigator.serviceWorker.getRegistration('/');
+        if (registration) {
+          const subscription = await registration.pushManager.getSubscription();
+          if (subscription) {
+            await subscription.unsubscribe();
+            alert('Unsubscribed!');
+            await checkSubscription();
+          }
+        }
+      } catch (error) {
+        alert('Error: ' + error.message);
+      }
+    };
+
+    document.getElementById('test-notification').onclick = async () => {
+      if (Notification.permission !== 'granted') {
+        alert('Permission not granted');
+        return;
+      }
+
+      const registration = await navigator.serviceWorker.getRegistration('/');
+      if (!registration) {
+        alert('No service worker');
+        return;
+      }
+
+      await registration.showNotification('Test Notification', {
+        body: 'This is a test notification from debug page',
+        icon: '/vite.svg',
+        badge: '/vite.svg',
+        tag: 'test',
+        requireInteraction: false,
+        vibrate: [200, 100, 200],
+      });
+    };
+
+    function urlBase64ToUint8Array(base64String) {
+      const padding = '='.repeat((4 - base64String.length % 4) % 4);
+      const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+      const rawData = window.atob(base64);
+      const outputArray = new Uint8Array(rawData.length);
+      for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+      }
+      return outputArray;
+    }
+
+    // Initial check
+    checkSupport();
+    checkPermission();
+    checkServiceWorker();
+    checkSubscription();
+
+    // Auto refresh every 5s
+    setInterval(() => {
+      checkPermission();
+      checkServiceWorker();
+      checkSubscription();
+    }, 5000);
+  </script>
+</body>
+</html>

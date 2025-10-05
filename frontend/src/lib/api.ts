@@ -281,3 +281,94 @@ export async function getConversationPresence(conversationId: string) {
     offline: string[];
   }>(res);
 }
+
+/* ========== Stars (Bookmarks) ========== */
+export async function toggleStar(userId: string, messageId: string) {
+  const res = await http('/stars/toggle', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': userId },
+    body: JSON.stringify({ messageId }),
+  });
+  return json(res);
+}
+
+export async function listStars(
+  userId: string,
+  params?: { conversationId?: string; limit?: number; cursor?: string }
+) {
+  const query = new URLSearchParams();
+  if (params?.conversationId) query.set('conversationId', params.conversationId);
+  if (params?.limit) query.set('limit', String(params.limit));
+  if (params?.cursor) query.set('cursor', params.cursor);
+  const qs = query.toString();
+  const res = await http(`/stars${qs ? '?' + qs : ''}`, {
+    headers: { 'X-User-Id': userId },
+  });
+  return json(res);
+}
+
+export async function checkStarFlags(userId: string, messageIds: string[]) {
+  const res = await http('/stars/flags', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': userId },
+    body: JSON.stringify({ messageIds }),
+  });
+  return json<Record<string, boolean>>(res);
+}
+
+/* ========== Pins ========== */
+export async function addPin(userId: string, messageId: string) {
+  const res = await http('/pins', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': userId },
+    body: JSON.stringify({ messageId }),
+  });
+  return json(res);
+}
+
+export async function removePin(userId: string, messageId: string) {
+  const res = await http(`/pins/${messageId}`, {
+    method: 'DELETE',
+    headers: { 'X-User-Id': userId },
+  });
+  return json(res);
+}
+
+export async function listPins(
+  userId: string,
+  conversationId: string,
+  params?: { limit?: number; cursor?: string }
+) {
+  const query = new URLSearchParams();
+  if (params?.limit) query.set('limit', String(params.limit));
+  if (params?.cursor) query.set('cursor', params.cursor);
+  const qs = query.toString();
+  const res = await http(`/pins/${conversationId}${qs ? '?' + qs : ''}`, {
+    headers: { 'X-User-Id': userId },
+  });
+  return json(res);
+}
+
+/* ========== Push Notifications ========== */
+export async function getPushPublicKey() {
+  const res = await http('/push/public-key');
+  return json<{ publicKey: string }>(res);
+}
+
+export async function subscribePush(userId: string, subscription: unknown) {
+  const res = await http('/push/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': userId },
+    body: JSON.stringify(subscription),
+  });
+  return json(res);
+}
+
+export async function unsubscribePush(endpoint: string) {
+  const res = await http('/push/unsubscribe', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ endpoint }),
+  });
+  return json(res);
+}

@@ -49,6 +49,13 @@ export async function listBlocks(userId: string) {
   return json<Block[]>(res);
 }
 
+export async function checkBlockStatus(userId: string, otherUserId: string) {
+  const res = await http(`/blocks/check/${otherUserId}`, {
+    headers: { 'X-User-Id': userId },
+  });
+  return json<{ blocked: boolean; direction: 'none' | 'blocker' | 'blocked' | 'mutual' }>(res);
+}
+
 // ============ REPORTS ============
 
 export type ReportType = 'MESSAGE' | 'USER' | 'CONVERSATION';
@@ -64,7 +71,7 @@ export interface Report {
   targetConversationId?: string;
   reason: ReportReason;
   details?: string;
-  evidence?: any;
+  evidence?: unknown;
   status: ReportStatus;
   action?: string;
   resolutionNotes?: string;

@@ -18,6 +18,7 @@ import { BlocksModule } from './modules/blocks/blocks.module';
 import { ModerationModule } from './modules/moderation/moderation.module';
 import { PushModule } from './modules/push/push.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { PinsModule } from './modules/pins/pins.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     ModerationModule,
     PushModule,
     NotificationsModule,
+    PinsModule,
   ],
 })
 export class AppModule {}

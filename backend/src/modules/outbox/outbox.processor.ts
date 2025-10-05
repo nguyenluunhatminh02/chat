@@ -60,6 +60,26 @@ export class OutboxProcessor extends WorkerHost {
         );
         return;
       }
+      case 'pin.added': {
+        const { conversationId, messageId } = job.data as {
+          conversationId: string;
+          messageId: string;
+        };
+        this.gw.emitToConversation(conversationId, 'pin.added', {
+          messageId,
+        });
+        return;
+      }
+      case 'pin.removed': {
+        const { conversationId, messageId } = job.data as {
+          conversationId: string;
+          messageId: string;
+        };
+        this.gw.emitToConversation(conversationId, 'pin.removed', {
+          messageId,
+        });
+        return;
+      }
     }
   }
 

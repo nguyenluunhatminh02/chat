@@ -43,6 +43,7 @@ model Conversation {
 
   members     ConversationMember[]
   message Message[]
+  pin Pin[]
 
   @@index([type])
 }
@@ -101,6 +102,8 @@ model Message {
   readReceipt ReadReceipt[]
   reaction Reaction[]
   attachment Attachment[]
+  stars Star[]
+  pins Pin[]
 
   // ✅ Index để load thread nhanh
   @@index([conversationId, createdAt])
@@ -229,6 +232,19 @@ model Block {
   @@index([blockerId])
 }
 
+model Ban {
+  id         String    @id @default(cuid())
+  userId     String
+  bannedById String
+  reason     String?
+  notes      String?
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime?
+
+  @@index([userId])
+  @@index([bannedById])
+}
+
 model ConversationBan {
   conversationId String
   userId         String
@@ -275,4 +291,33 @@ model PushSubscription {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+// ============ STARS & PINS ============
+
+model Star {
+  messageId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@index([userId, createdAt])
+  @@index([messageId])
+}
+
+model Pin {
+  id             String   @id @default(cuid())
+  conversationId String
+  messageId      String
+  pinnedBy       String
+  createdAt      DateTime @default(now())
+
+   // 🔗 Bổ sung FK để đảm bảo toàn vẹn
+  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message        Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, messageId])
+  @@index([conversationId, createdAt])
 }

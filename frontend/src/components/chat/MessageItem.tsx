@@ -6,6 +6,8 @@ import { ReactionPicker } from './ReactionPicker';
 import { ThreadPanel } from './ThreadPanel';
 import { ReportMessageModal } from './ReportMessageModal';
 import { BlockUserModal } from './BlockUserModal';
+import { PinButton } from './PinButton';
+import { MessageActionsMenu } from './MessageActionsMenu';
 import { DevBoundary } from '../DevTools';
 import type { Message, User } from '../../types';
 
@@ -27,6 +29,7 @@ interface MessageItemProps {
   onSendThreadReply?: () => void;
   getUserById?: (userId: string) => User | undefined;
   currentUserId?: string;
+  isPinned?: boolean;
 }
 
 // 🎨 Generate 2-letter initials from name
@@ -75,6 +78,7 @@ export function MessageItem({
   onSendThreadReply,
   getUserById,
   currentUserId,
+  isPinned,
 }: MessageItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState('');
@@ -196,13 +200,30 @@ export function MessageItem({
           isOwn ? 'flex-row-reverse' : 'flex-row'
         )}>
         {/* 🎨 Messenger Avatar - Circular */}
-        <div className="flex-shrink-0 self-end mb-0.5">
+        <div className="flex-shrink-0 self-end mb-0.5 flex items-end gap-1">
           <div className={cn(
             'h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold text-white shadow-md transition-all duration-200 select-none bg-gradient-to-br hover:scale-110',
             getAvatarGradient(user?.name || user?.email || 'User')
           )}>
             {getInitials(user?.name || user?.email || 'User')}
           </div>
+          
+          {/* Three-dots menu next to avatar */}
+          {!isEditing && !isDeleted && (
+            <MessageActionsMenu
+              isOwn={isOwn}
+              canEdit={!!onEdit}
+              canDelete={!!onDelete}
+              onEdit={onEdit ? handleStartEdit : undefined}
+              onDelete={onDelete ? () => onDelete(message.id) : undefined}
+              onReport={!isOwn && user ? () => setReportModalOpen(true) : undefined}
+              onBlock={!isOwn && user ? () => setBlockModalOpen(true) : undefined}
+              onCopy={message.type === 'TEXT' && message.content ? () => {
+                navigator.clipboard.writeText(message.content || '');
+              } : undefined}
+              className="text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity"
+            />
+          )}
         </div>
         
         <div className={cn(
@@ -219,7 +240,17 @@ export function MessageItem({
             </p>
           </div>
           
-          {/* 💬 Messenger Style Message Bubble - Improved */}
+          {/* � Pinned Badge (visible to all users) */}
+          {isPinned && (
+            <div className="flex items-center gap-1.5 mb-1 px-2 py-1 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full w-fit shadow-md">
+              <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+              </svg>
+              <span className="text-[10px] font-bold text-white uppercase tracking-wide">PINNED</span>
+            </div>
+          )}
+          
+          {/* �💬 Messenger Style Message Bubble - Improved */}
           <div className="relative group/bubble">
             {/* Message Tail - Messenger style */}
             {!isEditing && (
@@ -350,6 +381,14 @@ export function MessageItem({
                   </ReactionPicker>
                 )}
                 
+                {/* Pin button (Messenger style) - Everyone can pin/unpin */}
+                <PinButton 
+                  messageId={message.id} 
+                  isPinned={isPinned || false} 
+                  canPin={true}
+                  canUnpin={true}
+                />
+                
                 {/* Reply button - Messenger style */}
                 {onOpenThread && replyCount > 0 && (
                   <button
@@ -365,60 +404,7 @@ export function MessageItem({
                 )}
               </div>
               
-              {/* ✏️ Action buttons - Messenger style */}
-              {!isEditing && (
-                <div className="mt-1 flex items-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {/* Own message actions */}
-                  {isOwn && (
-                    <>
-                      {onEdit && (
-                        <button
-                          type="button"
-                          onClick={handleStartEdit}
-                          className="text-xs font-semibold text-gray-500 hover:text-gray-700 hover:underline transition-colors"
-                        >
-                          Edit
-                        </button>
-                      )}
-                      {onDelete && (
-                        <button
-                          type="button"
-                          onClick={() => onDelete(message.id)}
-                          className="text-xs font-semibold text-gray-500 hover:text-red-600 hover:underline transition-colors"
-                        >
-                          Remove
-                        </button>
-                      )}
-                    </>
-                  )}
-                  
-                  {/* Other user's message actions */}
-                  {!isOwn && user && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setReportModalOpen(true)}
-                        className="text-xs font-semibold text-gray-500 hover:text-red-600 hover:underline transition-colors flex items-center gap-1"
-                      >
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                        </svg>
-                        Report
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setBlockModalOpen(true)}
-                        className="text-xs font-semibold text-gray-500 hover:text-red-600 hover:underline transition-colors flex items-center gap-1"
-                      >
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                        </svg>
-                        Block User
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
+
             </>
           )}
           

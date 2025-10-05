@@ -6,6 +6,8 @@ import { MessageInput } from '../components/chat/MessageInput';
 import { SearchModal } from '../components/chat/SearchModal';
 import { TypingIndicator } from '../components/chat/TypingIndicator';
 import { NewConversationModal } from '../components/chat/NewConversationModal';
+import { PinnedMessagesPanel } from '../components/chat/PinnedMessagesPanel';
+import { BlockedBanner } from '../components/chat/BlockedBanner';
 import { NotificationBanner } from '../components/NotificationBanner';
 import { Button } from '../components/ui/Button';
 import { useAppContext } from '../hooks/useAppContext';
@@ -14,13 +16,15 @@ import { useConversations, useCreateConversation } from '../hooks/useConversatio
 import { useMessages, useSendMessage } from '../hooks/useMessages';
 import { useSearch, type SearchHit } from '../hooks/useSearch';
 import { useTyping } from '../hooks/useTyping';
+import { usePins } from '../hooks/usePins';
+import { useBlockStatus } from '../hooks/useBlockStatus';
 import { generateId } from '../utils/helpers';
 import { cn } from '../utils/cn';
-import { 
-  filesPresignPut, 
-  r2DirectPut, 
-  filesComplete, 
-  filesPresignGet, 
+import {
+  filesPresignPut,
+  r2DirectPut,
+  filesComplete,
+  filesPresignGet,
   filesCreateThumbnail,
   getPresence,
   updateMessage,
@@ -30,8 +34,85 @@ import {
   getThread,
   sendMessageIdempotent
 } from '../lib/api';
+import { unblockUser } from '../lib/moderation';
 import { realtime } from '../lib/realtime';
 import type { Conversation, ConversationMember, Message, User } from '../types';
+
+// Helper component to render messages with star/pin support
+function MessagesRenderer({
+  messages,
+  getUserById,
+  currentUserId,
+  selectedConvId,
+  handleEdit,
+  handleDelete,
+  handleToggleReaction,
+  reactions,
+  ensureReactions,
+  replyCounts,
+  handleOpenThread,
+  openThreadId,
+  threadMap,
+  threadInput,
+  setThreadInput,
+  handleSendThreadReply,
+}: {
+  messages: Message[];
+  getUserById: (userId: string) => User | undefined;
+  currentUserId: string;
+  selectedConvId: string;
+  handleEdit: (messageId: string, newContent: string) => void;
+  handleDelete: (messageId: string) => void;
+  handleToggleReaction: (messageId: string, emoji: string) => void;
+  reactions: Record<string, Record<string, string[]>>;
+  ensureReactions: (messageId: string) => void;
+  replyCounts: Record<string, number>;
+  handleOpenThread: (messageId: string) => void;
+  openThreadId: string | null;
+  threadMap: Record<string, Message[]>;
+  threadInput: string;
+  setThreadInput: (value: string) => void;
+  handleSendThreadReply: (parentId: string, content: string) => void;
+}) {
+  const { data: pinsData } = usePins(selectedConvId);
+
+  const pinnedMessageIds = useMemo(() => {
+    return new Set(pinsData?.items?.map(p => p.message.id) || []);
+  }, [pinsData]);
+
+  return (
+    <div className="space-y-1 flex flex-col-reverse">
+      {messages.map((message: Message) => {
+        const user = getUserById(message.senderId);
+        const isPinned = pinnedMessageIds.has(message.id);
+
+        return (
+          <MessageItem
+            key={message.id}
+            message={message}
+            user={user}
+            isOwn={message.senderId === currentUserId}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+            onReact={emoji => handleToggleReaction(message.id, emoji)}
+            reactions={reactions[message.id]}
+            onEnsureReactions={() => ensureReactions(message.id)}
+            replyCount={replyCounts[message.id] || 0}
+            onOpenThread={() => handleOpenThread(message.id)}
+            threadOpen={openThreadId === message.id}
+            threadMessages={threadMap[message.id] || []}
+            threadInput={threadInput}
+            onThreadInputChange={setThreadInput}
+            onSendThreadReply={() => handleSendThreadReply(message.id, threadInput)}
+            getUserById={getUserById}
+            currentUserId={currentUserId}
+            isPinned={isPinned}
+          />
+        );
+      })}
+    </div>
+  );
+}
 
 export function ChatPage() {
   const queryClient = useQueryClient();
@@ -46,6 +127,7 @@ export function ChatPage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [newConvOpen, setNewConvOpen] = useState(false);
+  const [showPinnedPanel, setShowPinnedPanel] = useState(false);
   
   // Presence state
   const [peerPresence, setPeerPresence] = useState<{ online: boolean; lastSeen: string | null } | null>(null);
@@ -98,6 +180,29 @@ export function ChatPage() {
     const otherId = conv.members.find((m: ConversationMember) => m.userId !== currentUserId)?.userId;
     return (users as User[]).find((u: User) => u.id === otherId) || null;
   }, [users, currentUserId]);
+
+  // Get other user ID for DIRECT conversations (for block check)
+  const otherUserId = useMemo(() => {
+    if (!selectedConv || selectedConv.type !== 'DIRECT') return undefined;
+    return selectedConv.members.find((m: ConversationMember) => m.userId !== currentUserId)?.userId;
+  }, [selectedConv, currentUserId]);
+
+  // Check block status for DIRECT conversations
+  const { data: blockStatus } = useBlockStatus(currentUserId, otherUserId);
+  const isBlocked = blockStatus?.blocked || false;
+  const blockDirection = blockStatus?.direction || 'none';
+
+  // Handle unblock action
+  const handleUnblock = useCallback(async () => {
+    if (!otherUserId || !currentUserId) return;
+    try {
+      await unblockUser(currentUserId, otherUserId);
+      queryClient.invalidateQueries({ queryKey: ['blockStatus'] });
+      queryClient.invalidateQueries({ queryKey: ['blocks'] });
+    } catch (error) {
+      console.error('Failed to unblock user:', error);
+    }
+  }, [currentUserId, otherUserId, queryClient]);
   
   type PresenceResponse = { online: boolean; lastSeen: string | null };
   type ReactionResponse = { emoji: string; userId: string };
@@ -283,12 +388,25 @@ export function ChatPage() {
       });
     };
     
+    // Pin event handlers
+    const handlePinAdded = (data: { messageId: string }) => {
+      console.log('📌 Pin added:', data);
+      queryClient.invalidateQueries({ queryKey: ['pins', selectedConvId] });
+    };
+
+    const handlePinRemoved = (data: { messageId: string }) => {
+      console.log('📌 Pin removed:', data);
+      queryClient.invalidateQueries({ queryKey: ['pins', selectedConvId] });
+    };
+
     // Register event handlers
     realtime.on('message.created', handleMessageCreated);
     realtime.on('message.updated', handleMessageUpdated);
     realtime.on('message.deleted', handleMessageDeleted);
     realtime.on('reaction.added', handleReactionAdded);
     realtime.on('reaction.removed', handleReactionRemoved);
+    realtime.on('pin.added', handlePinAdded);
+    realtime.on('pin.removed', handlePinRemoved);
     
     return () => {
       realtime.off('message.created', handleMessageCreated);
@@ -296,6 +414,8 @@ export function ChatPage() {
       realtime.off('message.deleted', handleMessageDeleted);
       realtime.off('reaction.added', handleReactionAdded);
       realtime.off('reaction.removed', handleReactionRemoved);
+      realtime.off('pin.added', handlePinAdded);
+      realtime.off('pin.removed', handlePinRemoved);
     };
   }, [currentUserId, selectedConvId, queryClient, openThreadId]);
 
@@ -804,6 +924,20 @@ export function ChatPage() {
                   </div>
                 )}
               </div>
+              
+              {/* Header Action Buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowPinnedPanel(true)}
+                  className="p-2 hover:bg-blue-50 rounded-full transition-all"
+                  title="View pinned messages"
+                  aria-label="View pinned messages"
+                >
+                  <svg className="w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                  </svg>
+                </button>
+              </div>
             </div>
 
             {/* 📱 Messages Area - Messenger Style */}
@@ -829,33 +963,24 @@ export function ChatPage() {
                   </div>
                 </div>
               ) : (
-                <div className="space-y-1 flex flex-col-reverse">
-                  {messages.map((message: Message) => {
-                    const user = getUserById(message.senderId);
-                    return (
-                      <MessageItem
-                        key={message.id}
-                        message={message}
-                        user={user}
-                        isOwn={message.senderId === currentUserId}
-                        onEdit={handleEdit}
-                        onDelete={handleDelete}
-                        onReact={emoji => handleToggleReaction(message.id, emoji)}
-                        reactions={reactions[message.id]}
-                        onEnsureReactions={() => ensureReactions(message.id)}
-                        replyCount={replyCounts[message.id] || 0}
-                        onOpenThread={() => handleOpenThread(message.id)}
-                        threadOpen={openThreadId === message.id}
-                        threadMessages={threadMap[message.id] || []}
-                        threadInput={threadInput}
-                        onThreadInputChange={setThreadInput}
-                        onSendThreadReply={() => handleSendThreadReply(message.id, threadInput)}
-                        getUserById={getUserById}
-                        currentUserId={currentUserId}
-                      />
-                    );
-                  })}
-                </div>
+                <MessagesRenderer
+                  messages={messages}
+                  getUserById={getUserById}
+                  currentUserId={currentUserId}
+                  selectedConvId={selectedConvId!}
+                  handleEdit={handleEdit}
+                  handleDelete={handleDelete}
+                  handleToggleReaction={handleToggleReaction}
+                  reactions={reactions}
+                  ensureReactions={ensureReactions}
+                  replyCounts={replyCounts}
+                  handleOpenThread={handleOpenThread}
+                  openThreadId={openThreadId}
+                  threadMap={threadMap}
+                  threadInput={threadInput}
+                  setThreadInput={setThreadInput}
+                  handleSendThreadReply={handleSendThreadReply}
+                />
               )}
             </div>
 
@@ -868,14 +993,22 @@ export function ChatPage() {
               />
             )}
 
-            {/* Message Input */}
-            <MessageInput
-              onSend={handleSendMessage}
-              onFileUpload={handleFileUpload}
-              disabled={sendMessageMutation.isPending}
-              onTypingStart={startTyping}
-              onTypingStop={stopTyping}
-            />
+            {/* Message Input or Blocked Banner */}
+            {isBlocked ? (
+              <BlockedBanner
+                type={blockDirection === 'blocker' ? 'blocker' : 'blocked'}
+                userName={getDirectPeer(selectedConv)?.name || 'User'}
+                onUnblock={blockDirection === 'blocker' ? handleUnblock : undefined}
+              />
+            ) : (
+              <MessageInput
+                onSend={handleSendMessage}
+                onFileUpload={handleFileUpload}
+                disabled={sendMessageMutation.isPending}
+                onTypingStart={startTyping}
+                onTypingStop={stopTyping}
+              />
+            )}
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center bg-gray-50">
@@ -912,6 +1045,23 @@ export function ChatPage() {
         onOpenChange={setNewConvOpen}
         onCreateConversation={handleCreateConversation}
       />
+
+      {/* Pinned Messages Panel */}
+      {showPinnedPanel && selectedConvId && (
+        <PinnedMessagesPanel
+          conversationId={selectedConvId}
+          onClose={() => setShowPinnedPanel(false)}
+          onMessageClick={(messageId) => {
+            // Scroll to message
+            const el = document.querySelector(`[data-message-id="${messageId}"]`);
+            el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            setShowPinnedPanel(false);
+          }}
+          getUserById={getUserById}
+        />
+      )}
+
+
       </div>
     </div>
   );

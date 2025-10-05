@@ -49,18 +49,24 @@ export class ModerationService {
   }
 
   async listReports(status?: 'OPEN' | 'RESOLVED' | 'REJECTED') {
-    return this.prisma.report.findMany({
+    const reports = await this.prisma.report.findMany({
       where: status ? { status } : {},
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
+
+    // Map reporterId to reportedBy for frontend compatibility
+    return reports.map((report) => ({
+      ...report,
+      reportedBy: report.reporterId,
+    }));
   }
 
   async resolve(
     reportId: string,
     adminUserId: string,
     body: {
-      action?: 'NONE' | 'DELETE_MESSAGE' | 'BLOCK_USER';
+      action?: 'NONE' | 'DELETE_MESSAGE' | 'BLOCK_USER' | 'GLOBAL_BAN';
       resolutionNotes?: string;
     },
   ) {
@@ -92,6 +98,22 @@ export class ModerationService {
       }
       // block 1 chiều: reporter chặn targetUser
       await this.blocks.block(rep.reporterId, rep.targetUserId);
+    }
+
+    if (body.action === 'GLOBAL_BAN') {
+      if (!rep.targetUserId) {
+        throw new ForbiddenException('No user target');
+      }
+      // Global ban: create Ban record (permanent)
+      await this.prisma.ban.create({
+        data: {
+          userId: rep.targetUserId,
+          bannedById: adminUserId,
+          reason: rep.reason,
+          notes: body.resolutionNotes,
+          expiresAt: null, // Permanent ban
+        },
+      });
     }
 
     const updated = await this.prisma.report.update({

@@ -55,6 +55,19 @@ export class BlocksService {
     });
   }
 
+  /** Check if A blocked B (one direction) */
+  async isBlocked(blockerId: string, blockedUserId: string) {
+    const now = new Date();
+    const block = await this.prisma.block.findFirst({
+      where: {
+        blockerId,
+        blockedUserId,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      },
+    });
+    return !!block;
+  }
+
   /** Có block hai chiều giữa A và B đang còn hiệu lực không? */
   async isBlockedEither(a: string, b: string) {
     const now = new Date();

@@ -7,19 +7,26 @@ import { ToggleReactionDto } from './dto/toggle-reaction.dto';
 import { MessagingGateway } from '../../websockets/messaging.gateway';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
+import { BlocksService } from '../blocks/blocks.service';
 
 @Injectable()
 export class ReactionsService {
   constructor(
     private prisma: PrismaService,
     private gw: MessagingGateway,
+    private blocks: BlocksService,
   ) {}
 
   async toggle(userId: string, dto: ToggleReactionDto) {
     // Lấy message + conversation để emit đúng room
     const msg = await this.prisma.message.findUnique({
       where: { id: dto.messageId },
-      select: { id: true, conversationId: true, deletedAt: true },
+      select: {
+        id: true,
+        conversationId: true,
+        deletedAt: true,
+        senderId: true,
+      },
     });
     if (!msg || msg.deletedAt) throw new NotFoundException('Message not found');
 
@@ -31,6 +38,14 @@ export class ReactionsService {
       select: { userId: true },
     });
     if (!member) throw new ForbiddenException('Not a member');
+
+    // Check if blocked (either direction)
+    const isBlocked = await this.blocks.isBlockedEither(userId, msg.senderId);
+    if (isBlocked) {
+      throw new ForbiddenException(
+        'Cannot react to messages from blocked users',
+      );
+    }
 
     // Toggle: nếu tồn tại -> xóa; nếu chưa -> tạo
     const exists = await this.prisma.reaction.findUnique({
