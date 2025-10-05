@@ -8,6 +8,7 @@ export { useAppContext } from './useAppContext';
 
 // Utility hooks
 export { useToggle } from './useToggle';
+export { useTyping } from './useTyping';
 export { usePrevious } from './usePrevious';
 export { useSearch } from './useSearch';
 export type { SearchHit } from './useSearch';

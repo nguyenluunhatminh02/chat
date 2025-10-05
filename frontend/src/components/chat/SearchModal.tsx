@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react';
+import { Search, X } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/Dialog';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
 import { SearchResults } from './SearchResults';
-import { cn } from '../../utils/cn';
+import { cn } from '../../lib/utils';
 import type { SearchHit } from '../../hooks/useSearch';
 import type { Conversation } from '../../types';
+import { DevBoundary } from '../DevTools';
 
 interface SearchModalProps {
   isOpen: boolean;
@@ -24,7 +27,6 @@ export function SearchModal({
   isOpen, 
   onClose, 
   onSearch, 
-  conversations, 
   selectedConvId,
   searchLoading = false,
   searchResults = [],
@@ -79,88 +81,110 @@ export function SearchModal({
     }
   };
 
-  const selectedConv = conversations.find((c) => c.id === selectedConvId);
-
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center pt-20 z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4">
-        <div className="p-4 border-b">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold">Search Messages</h2>
-            <Button variant="ghost" size="sm" onClick={onClose}>
-              ✕
-            </Button>
+    <DevBoundary 
+      name="SearchModal" 
+      filePath="src/components/chat/SearchModal.tsx"
+    >
+      <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className="max-w-2xl max-h-[80vh] p-0 overflow-hidden bg-white/95 backdrop-blur-xl border-gray-200 shadow-2xl">
+          <DialogHeader className="p-6 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-indigo-50">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg">
+                <Search className="w-5 h-5 text-white" />
+              </div>
+              <DialogTitle className="text-xl font-bold text-gray-900">Search Messages</DialogTitle>
+            </div>
+          </DialogHeader>
+          
+          <div className="p-6 space-y-4 bg-white/50">
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {/* Search Input */}
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                  <Search className="w-5 h-5 text-gray-400" />
+                </div>
+                <Input
+                  id="search-input"
+                  type="text"
+                  placeholder="Type to search messages..."
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="w-full pl-12 pr-12 py-3 text-base rounded-xl bg-white border-2 border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-gray-900 placeholder:text-gray-400"
+                />
+                {query && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setQuery('')}
+                    className="absolute inset-y-0 right-0 mr-2 h-auto w-8 hover:bg-gray-100"
+                  >
+                    <X className="w-4 h-4 text-gray-500" />
+                  </Button>
+                )}
+              </div>
+              
+              {/* Search Scope */}
+              <div className="flex items-center gap-6 p-4 bg-blue-50/50 border border-blue-100 rounded-xl">
+                <span className="text-sm font-semibold text-gray-700">Search in:</span>
+                <label className="flex items-center gap-2 cursor-pointer hover:bg-white/60 px-3 py-2 rounded-lg transition-colors">
+                  <input
+                    type="radio"
+                    name="scope"
+                    value="current"
+                    checked={scope === 'current'}
+                    onChange={(e) => setScope(e.target.value as 'current')}
+                    disabled={!selectedConvId}
+                    className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                  />
+                  <span className={cn(
+                    'text-sm font-medium',
+                    !selectedConvId ? 'text-gray-400' : 'text-gray-700'
+                  )}>
+                    This conversation
+                  </span>
+                </label>
+                
+                <label className="flex items-center gap-2 cursor-pointer hover:bg-white/60 px-3 py-2 rounded-lg transition-colors">
+                  <input
+                    type="radio"
+                    name="scope"
+                    value="all"
+                    checked={scope === 'all'}
+                    onChange={(e) => setScope(e.target.value as 'all')}
+                    className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                  />
+                  <span className="text-sm font-medium text-gray-700">All conversations</span>
+                </label>
+              </div>
+            </form>
           </div>
           
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <Input
-              id="search-input"
-              type="text"
-              placeholder="Search messages..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="w-full"
-            />
-            
-            <div className="flex items-center space-x-4">
-              <label className="flex items-center space-x-2">
-                <input
-                  type="radio"
-                  name="scope"
-                  value="current"
-                  checked={scope === 'current'}
-                  onChange={(e) => setScope(e.target.value as 'current')}
-                  disabled={!selectedConvId}
-                />
-                <span className={cn(
-                  'text-sm',
-                  !selectedConvId && 'text-gray-400'
-                )}>
-                  Current conversation
-                  {selectedConv && (
-                    <span className="text-gray-500 ml-1">
-                      ({selectedConv.title || 'Untitled'})
-                    </span>
-                  )}
-                </span>
-              </label>
-              
-              <label className="flex items-center space-x-2">
-                <input
-                  type="radio"
-                  name="scope"
-                  value="all"
-                  checked={scope === 'all'}
-                  onChange={(e) => setScope(e.target.value as 'all')}
-                />
-                <span className="text-sm">All conversations</span>
-              </label>
-            </div>
-            
-            <div className="flex justify-end space-x-2">
-              <Button type="button" variant="outline" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={!query.trim()}>
-                Search
-              </Button>
-            </div>
-          </form>
-        </div>
-        
-        {/* Search Results */}
-        {query.trim() && onJumpToMessage && (
-          <SearchResults
-            loading={searchLoading}
-            results={searchResults}
-            total={searchTotal}
-            error={searchError}
-            onJumpToMessage={onJumpToMessage}
-          />
-        )}
-      </div>
-    </div>
+          {/* Search Results */}
+          <div className="flex-1 overflow-hidden bg-gradient-to-b from-white/30 to-gray-50/50">
+            {query.trim() && onJumpToMessage ? (
+              <SearchResults
+                loading={searchLoading}
+                results={searchResults}
+                total={searchTotal}
+                error={searchError}
+                onJumpToMessage={onJumpToMessage}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-48">
+                <div className="text-center">
+                  <div className="w-16 h-16 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-sm">
+                    <Search className="w-8 h-8 text-blue-500" />
+                  </div>
+                  <p className="text-sm font-semibold text-gray-700">Start typing to search messages</p>
+                  <p className="text-xs text-gray-500 mt-2">Search across all your conversations</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </DevBoundary>
   );
 }

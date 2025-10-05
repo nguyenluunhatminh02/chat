@@ -4,12 +4,15 @@ import { ConversationItem } from '../components/chat/ConversationItem';
 import { MessageItem } from '../components/chat/MessageItem';
 import { MessageInput } from '../components/chat/MessageInput';
 import { SearchModal } from '../components/chat/SearchModal';
+import { TypingIndicator } from '../components/chat/TypingIndicator';
+import { NewConversationModal } from '../components/chat/NewConversationModal';
 import { Button } from '../components/ui/Button';
 import { useAppContext } from '../hooks/useAppContext';
 import { useUsers } from '../hooks/useUsers';
-import { useConversations } from '../hooks/useConversations';
+import { useConversations, useCreateConversation } from '../hooks/useConversations';
 import { useMessages, useSendMessage } from '../hooks/useMessages';
 import { useSearch, type SearchHit } from '../hooks/useSearch';
+import { useTyping } from '../hooks/useTyping';
 import { generateId } from '../utils/helpers';
 import { cn } from '../utils/cn';
 import { 
@@ -41,6 +44,7 @@ export function ChatPage() {
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [newConvOpen, setNewConvOpen] = useState(false);
   
   // Presence state
   const [peerPresence, setPeerPresence] = useState<{ online: boolean; lastSeen: string | null } | null>(null);
@@ -55,6 +59,13 @@ export function ChatPage() {
   const [replyCounts, setReplyCounts] = useState<Record<string, number>>({});
   
   const searchHook = useSearch();
+  
+  // Typing indicator
+  const { typingUsers, startTyping, stopTyping } = useTyping({
+    conversationId: selectedConvId,
+    currentUserId,
+    enabled: !!selectedConvId && !!currentUserId,
+  });
 
   // Keyboard shortcut for search (Ctrl/Cmd + K)
   useEffect(() => {
@@ -76,6 +87,7 @@ export function ChatPage() {
   const { data: conversations = [] } = useConversations(currentUserId);
   const { data: messagesData, isLoading: messagesLoading, error: messagesError } = useMessages(selectedConvId);
   const sendMessageMutation = useSendMessage();
+  const createConversationMutation = useCreateConversation();
   
   const selectedConv = (conversations as Conversation[]).find((c: Conversation) => c.id === selectedConvId);
   
@@ -137,6 +149,11 @@ export function ChatPage() {
       
       // Invalidate conversations list (for last message update)
       queryClient.invalidateQueries({ queryKey: ['conversations', currentUserId] });
+      
+      // Invalidate unread count for this conversation (if message is from someone else)
+      if (msg.senderId !== currentUserId) {
+        queryClient.invalidateQueries({ queryKey: ['unread', currentUserId, msg.conversationId] });
+      }
       
       // Update reply count if it's a thread reply
       if (msg.parentId) {
@@ -296,6 +313,33 @@ export function ChatPage() {
   }, [selectedConvId, currentUserId]);
 
   const messages = useMemo(() => (messagesData || []) as Message[], [messagesData]);
+
+  // Mark messages as read when viewing conversation
+  useEffect(() => {
+    if (!selectedConvId || !currentUserId || messages.length === 0) return;
+    
+    // Find the last message that is not from current user
+    const lastMessageFromOther = messages
+      .filter((m: Message) => m.senderId !== currentUserId)
+      .sort((a: Message, b: Message) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+    
+    if (!lastMessageFromOther) return;
+    
+    // Mark as read after a short delay (to avoid marking immediately)
+    const timer = setTimeout(async () => {
+      try {
+        const { markMessageRead } = await import('../lib/api');
+        await markMessageRead(currentUserId, selectedConvId, lastMessageFromOther.id);
+        
+        // Invalidate unread count
+        queryClient.invalidateQueries({ queryKey: ['unread', currentUserId, selectedConvId] });
+      } catch (err) {
+        console.error('Failed to mark message as read:', err);
+      }
+    }, 500);
+    
+    return () => clearTimeout(timer);
+  }, [selectedConvId, currentUserId, messages, queryClient]);
 
   // Auto scroll is handled by flex-col-reverse layout
   
@@ -565,6 +609,50 @@ export function ChatPage() {
     }
   };
 
+  // Create conversation handler with duplicate check
+  const handleCreateConversation = async (
+    type: 'DIRECT' | 'GROUP',
+    members: string[],
+    title?: string
+  ) => {
+    if (members.length === 0) return;
+
+    // For DIRECT chats, check if conversation already exists
+    if (type === 'DIRECT' && members.length === 1) {
+      const existingDirect = (conversations as Conversation[]).find(
+        (conv: Conversation) =>
+          conv.type === 'DIRECT' &&
+          conv.members.length === 2 &&
+          conv.members.some((m: ConversationMember) => m.userId === members[0]) &&
+          conv.members.some((m: ConversationMember) => m.userId === currentUserId)
+      );
+
+      if (existingDirect) {
+        // Conversation exists, just select it
+        setSelectedConvId(existingDirect.id);
+        setNewConvOpen(false);
+        return;
+      }
+    }
+
+    // Create new conversation
+    // Note: Backend automatically adds currentUserId, so only pass other members
+    const result = await createConversationMutation.mutateAsync({
+      userId: currentUserId,
+      data: {
+        type,
+        title,
+        members, // Don't add currentUserId - backend handles it
+      },
+    });
+
+    // Select the new conversation and close modal
+    if (result && typeof result === 'object' && 'id' in result) {
+      setSelectedConvId((result as { id: string }).id);
+      setNewConvOpen(false);
+    }
+  };
+
   if (!currentUserId) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -580,57 +668,87 @@ export function ChatPage() {
   }
 
   return (
-    <div className="flex h-screen bg-gradient-to-b from-blue-50 to-white">
-      {/* 🎨 Sidebar - Responsive with Mobile Overlay */}
+    <div className="flex h-screen bg-white">
+      {/* 🎨 Sidebar - Messenger Style */}
       <div className={cn(
         "md:flex md:w-80 lg:w-96 bg-white border-r border-gray-200 flex-col shadow-lg z-50",
-        "fixed md:relative inset-y-0 left-0 transform transition-transform duration-300 ease-in-out",
+        "fixed md:relative inset-y-0 left-0 transform transition-all duration-300 ease-out",
         sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
       )}>
-        <div className="p-4 border-b border-gray-200 bg-gradient-to-br from-blue-500 to-blue-600">
+        <div className="p-4 border-b border-gray-200">
           {/* Close button - Mobile only */}
           <button
             onClick={() => setSidebarOpen(false)}
-            className="md:hidden absolute top-4 right-4 p-2 text-white hover:bg-white/20 rounded-lg transition-colors"
+            className="md:hidden absolute top-4 right-4 p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-all"
             aria-label="Close menu"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
-          <div className="flex items-center justify-between mb-4">
-            <h1 className="text-2xl font-bold text-white">💬 Chats</h1>
-            <div className={cn(
-              'w-3 h-3 rounded-full shadow-lg transition-all',
-              isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'
-            )} />
+          
+          <div className="flex items-center justify-between mb-3">
+            <h1 className="text-2xl font-bold text-gray-900">Chats</h1>
+            <div className="flex items-center gap-2">
+              {/* New Chat Button */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setNewConvOpen(true)}
+                className="h-9 w-9 rounded-full hover:bg-gray-100 transition-all hover:scale-110 active:scale-95"
+                title="New conversation"
+              >
+                <svg className="w-5 h-5 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.75v14.5m7.25-7.25H4.75" />
+                </svg>
+                ➕
+              </Button>
+              
+              {/* Connection Status */}
+              <div className={cn(
+                'w-2.5 h-2.5 rounded-full transition-all',
+                isConnected ? 'bg-green-500' : 'bg-gray-400'
+              )} />
+            </div>
           </div>
           
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setSearchOpen(true)}
-            className="w-full justify-start text-white border-white/30 bg-white/10 hover:bg-white/20 backdrop-blur-sm rounded-xl font-semibold shadow-md"
-          >
-            🔍 Search messages... <span className="ml-auto text-xs opacity-75">⌘K</span>
-          </Button>
+          <div className="flex gap-2 mb-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSearchOpen(true)}
+              className="flex-1 justify-start text-gray-600 bg-gray-100 hover:bg-gray-200 border-0 rounded-full font-medium py-2"
+            >
+              <span className="mr-2">🔍</span>
+              <span>Search...</span>
+            </Button>
+          </div>
         </div>
         
         <div className="flex-1 overflow-y-auto">
-          {(conversations as Conversation[]).map((conv: Conversation) => (
-            <ConversationItem
-              key={conv.id}
-              id={conv.id}
-              title={conv.title || undefined}
-              type={conv.type}
-              members={conv.members}
-              lastMessage={conv.lastMessage || undefined}
-              isSelected={conv.id === selectedConvId}
-              onClick={() => setSelectedConvId(conv.id)}
-              users={users as User[]}
-              currentUserId={currentUserId}
-            />
-          ))}
+          {(conversations as Conversation[]).length === 0 ? (
+            <div className="flex items-center justify-center h-full px-4">
+              <div className="text-center">
+                <div className="text-5xl mb-3">💬</div>
+                <p className="text-gray-600 font-medium">No conversations yet</p>
+              </div>
+            </div>
+          ) : (
+            (conversations as Conversation[]).map((conv: Conversation) => (
+              <ConversationItem
+                key={conv.id}
+                id={conv.id}
+                title={conv.title || undefined}
+                type={conv.type}
+                members={conv.members}
+                lastMessage={conv.lastMessage || undefined}
+                isSelected={conv.id === selectedConvId}
+                onClick={() => setSelectedConvId(conv.id)}
+                users={users as User[]}
+                currentUserId={currentUserId}
+              />
+            ))
+          )}
         </div>
       </div>
 
@@ -646,62 +764,62 @@ export function ChatPage() {
       <div className="flex-1 flex flex-col">
         {selectedConv ? (
           <>
-            {/* 💎 Chat Header - Responsive with Hamburger */}
-            <div className="bg-white border-b border-gray-200 p-3 sm:p-4 flex items-center gap-3 shadow-sm">
+            {/* 💎 Chat Header - Messenger Style */}
+            <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3 shadow-sm">
               {/* Hamburger Menu - Mobile Only */}
               <button
                 onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="md:hidden p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                className="md:hidden p-2 hover:bg-gray-100 rounded-full transition-all"
                 aria-label="Toggle menu"
               >
-                <svg className="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                <svg className="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
               </button>
               
-              <div className="flex-1">
-              <h2 className="text-xl font-bold text-slate-900">
-                {selectedConv.title || 
-                  (selectedConv.type === 'DIRECT' 
-                    ? getUserById(selectedConv.members.find((m: ConversationMember) => m.userId !== currentUserId)?.userId || '')?.name || 'Direct Chat'
-                    : `Group Chat (${selectedConv.members.length})`
-                  )
-                }
-              </h2>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-base font-semibold text-gray-900 truncate">
+                  {selectedConv.title || 
+                    (selectedConv.type === 'DIRECT' 
+                      ? getUserById(selectedConv.members.find((m: ConversationMember) => m.userId !== currentUserId)?.userId || '')?.name || 'Direct Chat'
+                      : `Group Chat (${selectedConv.members.length})`
+                    )
+                  }
+                </h2>
+                {selectedConv.type === 'DIRECT' && peerPresence && (
+                  <div className="text-xs mt-0.5">
+                    {peerPresence.online ? (
+                      <span className="text-green-600 font-medium">Active now</span>
+                    ) : (
+                      <span className="text-gray-500">
+                        Active {peerPresence.lastSeen ? new Date(peerPresence.lastSeen).toLocaleString() : 'recently'}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
-              {selectedConv.type === 'DIRECT' && peerPresence && (
-                <div className="flex-shrink-0">
-                <div className="text-sm mt-2">
-                  {peerPresence.online ? (
-                    <span className="text-emerald-600 flex items-center gap-2 font-semibold">
-                      <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse shadow-lg shadow-emerald-500/50"></span>
-                      Online
-                    </span>
-                  ) : (
-                    <span className="text-slate-500 font-medium">
-                      Last seen {peerPresence.lastSeen ? new Date(peerPresence.lastSeen).toLocaleString() : '—'}
-                    </span>
-                  )}
-                </div>
-                </div>
-              )}
             </div>
 
             {/* 📱 Messages Area - Messenger Style */}
-            <div id="messages-container" className="flex-1 overflow-y-auto p-4 md:p-6 bg-gradient-to-b from-blue-50/30 to-transparent flex flex-col-reverse">
+            <div id="messages-container" className="flex-1 overflow-y-auto p-4 bg-white flex flex-col-reverse">
               {messagesLoading ? (
                 <div className="flex items-center justify-center flex-1">
-                  <div className="text-gray-500">Loading messages...</div>
+                  <div className="text-center">
+                    <div className="w-10 h-10 border-3 border-gray-300 border-t-[#0084ff] rounded-full animate-spin mx-auto mb-2" />
+                    <p className="text-gray-500 text-sm">Loading...</p>
+                  </div>
                 </div>
               ) : messagesError ? (
                 <div className="flex items-center justify-center flex-1">
-                  <div className="text-red-500">Error loading messages: {messagesError.message}</div>
+                  <div className="text-center text-red-500">
+                    <p>Error: {messagesError.message}</p>
+                  </div>
                 </div>
               ) : messages.length === 0 ? (
                 <div className="flex items-center justify-center flex-1">
                   <div className="text-center">
-                    <div className="text-4xl mb-2">💬</div>
-                    <div className="text-gray-500">No messages yet. Start a conversation!</div>
+                    <div className="text-5xl mb-2">💬</div>
+                    <p className="text-gray-500">No messages yet</p>
                   </div>
                 </div>
               ) : (
@@ -741,18 +859,34 @@ export function ChatPage() {
               )}
             </div>
 
+            {/* Typing Indicator */}
+            {typingUsers.length > 0 && (
+              <TypingIndicator
+                typingUserIds={typingUsers}
+                users={users as User[]}
+                currentUserId={currentUserId}
+              />
+            )}
+
             {/* Message Input */}
             <MessageInput
               onSend={handleSendMessage}
               onFileUpload={handleFileUpload}
               disabled={sendMessageMutation.isPending}
+              onTypingStart={startTyping}
+              onTypingStop={stopTyping}
             />
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center text-gray-500">
-              <h3 className="text-lg font-medium mb-2">Select a conversation</h3>
-              <p>Choose a conversation from the sidebar to start chatting</p>
+          <div className="flex-1 flex items-center justify-center bg-gray-50">
+            <div className="text-center">
+              <div className="text-7xl mb-4">💬</div>
+              <h3 className="text-xl font-semibold text-gray-700 mb-2">
+                Select a conversation
+              </h3>
+              <p className="text-gray-500 text-sm">
+                Choose from your existing conversations
+              </p>
             </div>
           </div>
         )}
@@ -770,6 +904,13 @@ export function ChatPage() {
         searchTotal={searchHook.total}
         searchError={searchHook.error}
         onJumpToMessage={handleJumpToMessage}
+      />
+
+      {/* New Conversation Modal */}
+      <NewConversationModal
+        open={newConvOpen}
+        onOpenChange={setNewConvOpen}
+        onCreateConversation={handleCreateConversation}
       />
     </div>
   );

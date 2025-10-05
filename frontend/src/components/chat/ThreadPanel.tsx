@@ -1,5 +1,6 @@
 import { formatTime } from '../../utils/helpers';
 import type { Message, User } from '../../types';
+import { DevBoundary } from '../DevTools';
 
 interface ThreadPanelProps {
   parentId: string;
@@ -20,6 +21,10 @@ export function ThreadPanel({
   onSendReply,
 }: ThreadPanelProps) {
   return (
+    <DevBoundary 
+              name="ThreadPanel" 
+              filePath="src/components/chat/ThreadPanel.tsx"
+            >
     <div className="mt-2 border rounded-lg bg-gray-50">
       <div className="px-3 py-2 text-xs text-gray-600 border-b">Thread</div>
       
@@ -99,5 +104,6 @@ export function ThreadPanel({
         </button>
       </div>
     </div>
+    </DevBoundary>
   );
 }

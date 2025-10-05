@@ -9,6 +9,8 @@ import { Queue, JobsOptions } from 'bullmq';
 import { PrismaService } from 'src/prisma/prisma.service';
 
 const FORWARDER_ID = `outbox-forwarder:${process.pid}`;
+const TX_MAX_RETRIES = 5;
+const TX_BASE_DELAY_MS = 100;
 
 @Injectable()
 export class OutboxForwarder implements OnModuleInit, OnModuleDestroy {
@@ -19,6 +21,19 @@ export class OutboxForwarder implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     @InjectQueue('outbox') private readonly queue: Queue,
   ) {}
+
+  private sleep(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private isTransactionTimeoutError(error: unknown) {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code?: string }).code === 'P2028'
+    );
+  }
 
   onModuleInit() {
     this.timer = setInterval(
@@ -45,28 +60,58 @@ export class OutboxForwarder implements OnModuleInit, OnModuleDestroy {
     return this.safeJobId(raw);
   }
 
-  private async tick() {
-    const batch = await this.prisma.$transaction(async (tx) => {
-      const rows = await tx.outbox.findMany({
-        where: {
-          publishedAt: null,
-          OR: [
-            { claimedAt: null },
-            { claimedAt: { lt: new Date(Date.now() - 30_000) } },
-          ],
-        },
-        orderBy: { createdAt: 'asc' },
-        take: 50,
-      });
-      if (!rows.length) return [] as typeof rows;
+  private async claimBatch() {
+    for (let attempt = 1; attempt <= TX_MAX_RETRIES; attempt++) {
+      try {
+        return await this.prisma.$transaction(
+          async (tx) => {
+            const rows = await tx.outbox.findMany({
+              where: {
+                publishedAt: null,
+                OR: [
+                  { claimedAt: null },
+                  { claimedAt: { lt: new Date(Date.now() - 30_000) } },
+                ],
+              },
+              orderBy: { createdAt: 'asc' },
+              take: 50,
+            });
+            if (!rows.length) return [] as typeof rows;
 
-      const ids = rows.map((r) => r.id);
-      await tx.outbox.updateMany({
-        where: { id: { in: ids } },
-        data: { claimedAt: new Date(), claimedBy: FORWARDER_ID },
-      });
-      return rows;
-    });
+            const ids = rows.map((r) => r.id);
+            await tx.outbox.updateMany({
+              where: { id: { in: ids } },
+              data: { claimedAt: new Date(), claimedBy: FORWARDER_ID },
+            });
+            return rows;
+          },
+          {
+            maxWait: 2_000,
+            timeout: 7_000,
+          },
+        );
+      } catch (error) {
+        if (this.isTransactionTimeoutError(error)) {
+          const backoff = TX_BASE_DELAY_MS * attempt ** 2;
+          this.log.warn(
+            `Transaction contention (P2028) while claiming outbox events. Retry ${attempt}/${TX_MAX_RETRIES} after ${backoff}ms`,
+          );
+          await this.sleep(backoff);
+          continue;
+        }
+
+        throw error;
+      }
+    }
+
+    this.log.error(
+      `Failed to claim outbox batch after ${TX_MAX_RETRIES} retries due to transaction contention`,
+    );
+    return [] as Awaited<ReturnType<typeof this.prisma.outbox.findMany>>;
+  }
+
+  private async tick() {
+    const batch = await this.claimBatch();
 
     if (!batch.length) return;
 

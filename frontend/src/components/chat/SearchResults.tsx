@@ -2,6 +2,7 @@ import { formatTime } from '../../utils/helpers';
 import { LoadingSpinner } from '../ui/LoadingSpinner';
 import { Button } from '../ui/Button';
 import type { SearchHit } from '../../hooks/useSearch';
+import { DevBoundary } from '../DevTools';
 
 interface SearchResultsProps {
   loading: boolean;
@@ -49,6 +50,10 @@ export function SearchResults({
   }
 
   return (
+    <DevBoundary 
+              name="SearchResult" 
+              filePath="src/components/chat/SearchResult.tsx"
+            >
     <div className="max-h-96 overflow-y-auto">
       <div className="p-3 border-b bg-gray-50 text-sm text-gray-600">
         Found {total} result{total !== 1 ? 's' : ''}
@@ -106,5 +111,6 @@ export function SearchResults({
         </div>
       )}
     </div>
+    </DevBoundary>
   );
 }

@@ -232,3 +232,52 @@ export async function getMessagesAround(
     messages: unknown[];
   }>(res);
 }
+
+/* ========== Receipts (Read Status) ========== */
+export async function markMessageRead(
+  userId: string,
+  conversationId: string,
+  messageId: string
+) {
+  const res = await http('/receipts/read', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': userId },
+    body: JSON.stringify({ conversationId, messageId }),
+  });
+  return json<{
+    ok: boolean;
+    conversationId: string;
+    messageId: string;
+    readAt: string;
+  }>(res);
+}
+
+export async function getUnreadCount(userId: string, conversationId: string) {
+  const res = await http(`/receipts/unread/${conversationId}`, {
+    headers: { 'X-User-Id': userId },
+  });
+  return json<{
+    conversationId: string;
+    unread: number;
+    since: string;
+  }>(res);
+}
+
+/* ========== Typing Indicators ========== */
+export async function getTypingUsers(conversationId: string) {
+  const res = await http(`/presence/typing/${conversationId}`);
+  return json<{
+    conversationId: string;
+    typing: string[];
+  }>(res);
+}
+
+export async function getConversationPresence(conversationId: string) {
+  const res = await http(`/presence/conversation/${conversationId}`);
+  return json<{
+    conversationId: string;
+    counts: { total: number; online: number };
+    online: string[];
+    offline: string[];
+  }>(res);
+}

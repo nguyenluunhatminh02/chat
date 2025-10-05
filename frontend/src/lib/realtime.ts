@@ -28,6 +28,10 @@ export class RealtimeClient {
     handler ? this.socket.off(event, handler) : this.socket.removeAllListeners(event);
   }
 
+  emit(event: string, data?: any) {
+    this.socket?.emit(event, data);
+  }
+
   disconnect() {
     if (this.hbTimer) clearInterval(this.hbTimer);
     this.hbTimer = undefined;

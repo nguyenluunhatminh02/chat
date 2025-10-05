@@ -4,6 +4,7 @@ import { formatTime } from '../../utils/helpers';
 import { tryParseFileContent } from '../../utils/file';
 import { ReactionPicker } from './ReactionPicker';
 import { ThreadPanel } from './ThreadPanel';
+import { DevBoundary } from '../DevTools';
 import type { Message, User } from '../../types';
 
 interface MessageItemProps {
@@ -100,7 +101,7 @@ export function MessageItem({
   const renderContent = () => {
     if (isDeleted) {
       return (
-        <div className="italic text-gray-500 bg-gray-100 rounded p-2">
+        <div className="italic text-gray-400 text-sm">
           This message was deleted
         </div>
       );
@@ -110,23 +111,23 @@ export function MessageItem({
     if (message.type === 'IMAGE' && fileContent) {
       if (fileContent.url) {
         return (
-          <a href={fileContent.url} target="_blank" rel="noreferrer" className="block max-w-full">
+          <a href={fileContent.url} target="_blank" rel="noreferrer" className="block max-w-full group">
             <img
               src={fileContent.thumbUrl || fileContent.url}
               alt={fileContent.filename}
-              className="max-h-72 max-w-full rounded-lg object-contain"
+              className="max-h-72 max-w-full rounded-xl object-contain shadow-md group-hover:shadow-xl transition-shadow"
             />
-            <div className="mt-1 text-xs opacity-70">
+            <div className="mt-2 text-xs opacity-80 font-medium">
               {fileContent.filename} {fileContent.size ? `· ${(fileContent.size / 1024).toFixed(1)} KB` : ''}
             </div>
           </a>
         );
       } else {
         return (
-          <div className="bg-gray-100 rounded p-3 text-center">
-            <div className="text-4xl mb-2">🖼️</div>
-            <p className="text-sm font-medium">{fileContent.filename}</p>
-            <p className="text-xs text-gray-500 mt-1">Image uploading...</p>
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 text-center border border-blue-100">
+            <div className="text-4xl mb-2 animate-pulse">🖼️</div>
+            <p className="text-sm font-semibold text-gray-700">{fileContent.filename}</p>
+            <p className="text-xs text-blue-600 mt-1 font-medium">Uploading image...</p>
           </div>
         );
       }
@@ -136,13 +137,13 @@ export function MessageItem({
     if (message.type === 'FILE' && fileContent) {
       if (fileContent.url) {
         return (
-          <a href={fileContent.url} target="_blank" rel="noreferrer" className="block">
-            <div className="flex items-center space-x-2 bg-gray-100 rounded p-2">
-              <div className="flex-shrink-0 text-2xl">📎</div>
+          <a href={fileContent.url} target="_blank" rel="noreferrer" className="block group">
+            <div className="flex items-center space-x-3 bg-white/90 border-2 border-gray-200 rounded-xl p-3 hover:border-blue-400 hover:shadow-md transition-all">
+              <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-lg flex items-center justify-center text-xl shadow-sm">📎</div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{fileContent.filename}</p>
+                <p className="text-sm font-semibold truncate text-gray-800 group-hover:text-blue-600">{fileContent.filename}</p>
                 {fileContent.size && (
-                  <p className="text-xs text-gray-500">{(fileContent.size / 1024).toFixed(1)} KB</p>
+                  <p className="text-xs text-gray-500 font-medium">{(fileContent.size / 1024).toFixed(1)} KB</p>
                 )}
               </div>
             </div>
@@ -150,11 +151,11 @@ export function MessageItem({
         );
       } else {
         return (
-          <div className="flex items-center space-x-2 bg-gray-100 rounded p-2">
-            <div className="flex-shrink-0 text-2xl">📎</div>
+          <div className="flex items-center space-x-3 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 rounded-xl p-3">
+            <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-lg flex items-center justify-center text-xl shadow-sm animate-pulse">📎</div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{fileContent.filename}</p>
-              <p className="text-xs text-gray-500">Uploading...</p>
+              <p className="text-sm font-semibold truncate text-gray-700">{fileContent.filename}</p>
+              <p className="text-xs text-blue-600 font-medium">Uploading...</p>
             </div>
           </div>
         );
@@ -175,21 +176,25 @@ export function MessageItem({
   };
 
   return (
-    <div 
-      data-message-id={message.id}
-      className={cn(
-        'flex w-full mb-6 transition-all duration-200',
-        isOwn ? 'justify-end' : 'justify-start'
-      )}
+    <DevBoundary 
+      name="MessageItem" 
+      filePath="src/components/chat/MessageItem.tsx"
     >
-      <div className={cn(
-        'flex max-w-[85%] sm:max-w-[75%] md:max-w-[70%] lg:max-w-[65%] group',
-        isOwn ? 'flex-row-reverse' : 'flex-row'
-      )}>
-        {/* 🎨 Modern Avatar with Gradient & Initials - Responsive */}
-        <div className="flex-shrink-0">
+      <div 
+        data-message-id={message.id}
+        className={cn(
+          'flex w-full mb-3 transition-all duration-200',
+          isOwn ? 'justify-end' : 'justify-start'
+        )}
+      >
+        <div className={cn(
+          'flex gap-2 max-w-[85%] sm:max-w-[75%] md:max-w-[70%] lg:max-w-[65%] group',
+          isOwn ? 'flex-row-reverse' : 'flex-row'
+        )}>
+        {/* 🎨 Messenger Avatar - Circular */}
+        <div className="flex-shrink-0 self-end mb-0.5">
           <div className={cn(
-            'h-9 w-9 sm:h-10 sm:w-10 md:h-11 md:w-11 rounded-xl sm:rounded-2xl flex items-center justify-center text-xs sm:text-sm font-bold text-white shadow-lg transition-all duration-300 hover:scale-110 hover:rotate-3 select-none bg-gradient-to-br',
+            'h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold text-white shadow-md transition-all duration-200 select-none bg-gradient-to-br hover:scale-110',
             getAvatarGradient(user?.name || user?.email || 'User')
           )}>
             {getInitials(user?.name || user?.email || 'User')}
@@ -198,71 +203,109 @@ export function MessageItem({
         
         <div className={cn(
           'flex flex-col',
-          isOwn ? 'items-end mr-2 sm:mr-3 md:mr-3.5' : 'items-start ml-2 sm:ml-3 md:ml-3.5'
+          isOwn ? 'items-end' : 'items-start'
         )}>
-          {/* Name & Timestamp Header - Responsive */}
+          {/* Timestamp - Messenger style (shows on hover) */}
           <div className={cn(
-            'flex items-center gap-1.5 sm:gap-2 mb-1 sm:mb-1.5',
+            'flex items-center gap-1 mb-0.5 opacity-0 group-hover:opacity-100 transition-opacity',
             isOwn ? 'flex-row-reverse' : 'flex-row'
           )}>
-            <p className="text-xs sm:text-sm font-semibold text-slate-900 truncate max-w-[120px] sm:max-w-none">
-              {user?.name || user?.email || 'Unknown User'}
-            </p>
-            <p className="text-[10px] sm:text-xs font-medium text-slate-500 whitespace-nowrap">
+            <p className="text-[11px] font-normal text-gray-500 whitespace-nowrap">
               {formatTime(message.createdAt)}
             </p>
           </div>
           
-          {/* 💬 Messenger-style Bubble - Bo tròn tự nhiên */}
-          <div 
-            className={cn(
-              'rounded-[20px] px-5 py-3 min-w-[140px] max-w-full transition-all duration-200 hover:shadow-lg',
-              isOwn 
-                ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-md' 
-                : 'bg-white border border-gray-200 text-gray-900 shadow-sm'
+          {/* 💬 Messenger Style Message Bubble - Improved */}
+          <div className="relative group/bubble">
+            {/* Message Tail - Messenger style */}
+            {!isEditing && (
+              <span 
+                aria-hidden 
+                className={cn(
+                  'absolute -bottom-0.5 w-3 h-3 pointer-events-none',
+                  isOwn 
+                    ? 'right-0 translate-x-[6px]'
+                    : 'left-0 -translate-x-[6px]'
+                )}
+              >
+                <svg viewBox="0 0 8 13" className={isOwn ? 'text-[#0084ff]' : 'text-[#e4e6eb]'}>
+                  <path d={isOwn ? "M1.533,3.568L8,12.193V1H2.812 C1.042,1,0.474,2.156,1.533,3.568z" : "M5.188,1H0v11.193l6.467-8.625 C7.526,2.156,6.958,1,5.188,1z"} fill="currentColor"/>
+                </svg>
+              </span>
             )}
-            onMouseEnter={onEnsureReactions}
-          >
-            {isEditing ? (
-              <div className="space-y-3">
-                <input
-                  autoFocus
-                  type="text"
-                  value={editText}
-                  onChange={e => setEditText(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') handleSaveEdit();
-                    if (e.key === 'Escape') handleCancelEdit();
-                  }}
-                  className="w-full px-3 py-2 text-sm rounded-xl border-2 border-indigo-300 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                />
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleSaveEdit}
-                    className="px-4 py-2 text-sm font-semibold rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white hover:from-emerald-600 hover:to-teal-700 shadow-md hover:shadow-lg transition-all"
-                  >
-                    Save
-                  </button>
-                  <button
-                    onClick={handleCancelEdit}
-                    className="px-4 py-2 text-sm font-semibold rounded-xl border-2 border-slate-300 bg-white text-slate-700 hover:bg-slate-50 shadow-sm transition-all"
-                  >
-                    Cancel
-                  </button>
+            
+            <div 
+              className={cn(
+                'relative rounded-[18px] px-4 py-2.5 min-w-[80px] max-w-full transition-all duration-200 shadow-sm',
+                isOwn 
+                  ? 'bg-[#0084ff] text-white' 
+                  : 'bg-[#e4e6eb] text-[#050505]',
+                isEditing && 'ring-2 ring-blue-400'
+              )}
+              onMouseEnter={onEnsureReactions}
+            >
+              {isEditing ? (
+                <div className="space-y-4">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={editText}
+                    onChange={e => setEditText(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') handleSaveEdit();
+                      if (e.key === 'Escape') handleCancelEdit();
+                    }}
+                    className="w-full px-4 py-3 text-sm rounded-2xl border-2 border-indigo-300 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white/95 shadow-inner font-medium"
+                  />
+                  <div className="flex gap-2.5">
+                    <button
+                      onClick={handleSaveEdit}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white hover:from-emerald-600 hover:to-teal-700 shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                      Save
+                    </button>
+                    <button
+                      onClick={handleCancelEdit}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold rounded-2xl border-2 border-slate-300 bg-white text-slate-700 hover:bg-slate-50 shadow-md transition-all"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                      Cancel
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div className="text-[15px] leading-normal break-words min-w-0">
-                {renderContent()}
-              </div>
-            )}
+              ) : (
+                <>
+                  <div className="text-[16px] leading-relaxed break-words min-w-0">
+                    {renderContent()}
+                  </div>
+                  {message.editedAt && (
+                    <div className={cn(
+                      'mt-2 flex items-center gap-2 text-[10px] uppercase font-bold tracking-wider',
+                      isOwn ? 'text-white/70' : 'text-gray-400'
+                    )}>
+                      <span className={cn(
+                        'px-2 py-0.5 rounded-full font-bold',
+                        isOwn ? 'bg-white/20' : 'bg-gray-200'
+                      )}>
+                        Edited
+                      </span>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
 
           {!isDeleted && (
             <>
-              {/* 🎨 Reactions & Reply Row - Responsive */}
-              <div className="mt-2 sm:mt-3 flex flex-wrap items-center gap-1.5 sm:gap-2">
-                {/* Reactions */}
+              {/* 🎨 Reactions & Reply Row - Always Visible */}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                {/* Reactions - Always visible when they exist */}
                 {Object.keys(reactions)
                   .sort()
                   .map(emoji => {
@@ -273,56 +316,70 @@ export function MessageItem({
                     return (
                       <button
                         key={emoji}
+                        type="button"
                         className={cn(
-                          'group relative inline-flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl sm:rounded-2xl font-bold transition-all',
+                          'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm transition-all duration-200 transform hover:scale-110 active:scale-95 font-medium',
                           byMe 
-                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-lg hover:shadow-xl transform hover:-translate-y-0.5' 
-                            : 'bg-white hover:bg-gray-50 border-2 border-gray-200 hover:border-gray-300 text-gray-900 shadow hover:shadow-md'
+                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg ring-2 ring-blue-300'
+                            : 'bg-white text-gray-800 shadow-md border-2 border-gray-200 hover:border-blue-400 hover:shadow-lg'
                         )}
                         onClick={() => onReact?.(emoji)}
-                        title={`${count} reaction${count > 1 ? 's' : ''} ${byMe ? ' (including you)' : ''}`}
+                        title={`${count} reaction${count > 1 ? 's' : ''}${byMe ? ' · you reacted' : ''}`}
+                        aria-pressed={byMe}
                       >
-                        <span className="text-lg sm:text-2xl leading-none filter drop-shadow-sm">{emoji}</span>
-                        <span className={cn(
-                          'text-sm sm:text-base font-extrabold tabular-nums',
-                          byMe ? 'text-white' : 'text-gray-700'
-                        )}>{count}</span>
+                        <span className="text-lg leading-none">{emoji}</span>
+                        <span className="tabular-nums font-bold text-sm">{count}</span>
                       </button>
                     );
                   })}
                 
-                {/* Add reaction button */}
-                {onReact && <ReactionPicker onPick={onReact} />}
+                {/* Add reaction button - Always visible with icon */}
+                {onReact && (
+                  <ReactionPicker onPick={onReact}>
+                    <button
+                      type="button"
+                      className="inline-flex items-center justify-center w-8 h-8 rounded-full text-gray-500 bg-white hover:bg-gray-50 border-2 border-gray-200 hover:border-blue-400 transition-all shadow-sm hover:shadow-md hover:scale-110 active:scale-95"
+                      title="Add reaction"
+                    >
+                      <span className="text-base font-semibold">➕</span>
+                    </button>
+                  </ReactionPicker>
+                )}
                 
-                {/* Reply button - Responsive */}
-                {onOpenThread && (
+                {/* Reply button - Messenger style */}
+                {onOpenThread && replyCount > 0 && (
                   <button
-                    className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl sm:rounded-2xl font-semibold bg-white hover:bg-gray-50 border-2 border-gray-200 hover:border-gray-300 text-gray-900 transition-all shadow hover:shadow-md"
+                    type="button"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 hover:border-blue-300 transition-all shadow-sm hover:shadow-md"
                     onClick={onOpenThread}
                   >
-                    <span className="text-lg sm:text-xl leading-none">💬</span>
-                    <span className="text-xs sm:text-sm font-bold text-gray-700">{replyCount > 0 ? `${replyCount} ${replyCount === 1 ? 'reply' : 'replies'}` : 'Reply'}</span>
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                    </svg>
+                    {replyCount} {replyCount === 1 ? 'reply' : 'replies'}
                   </button>
                 )}
               </div>
               
-              {/* ✏️ Edit/Delete buttons */}
-              {!isEditing && (
-                <div className="mt-2 flex items-center gap-3 opacity-0 group-hover:opacity-100 transition-all duration-200">
-                  {isOwn && onEdit && (
+              {/* ✏️ Edit/Delete buttons - Messenger style */}
+              {!isEditing && isOwn && (
+                <div className="mt-1 flex items-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {onEdit && (
                     <button
+                      type="button"
                       onClick={handleStartEdit}
-                      className="text-xs font-semibold text-slate-500 hover:text-indigo-600 transition-colors"
+                      className="text-xs font-semibold text-gray-500 hover:text-gray-700 hover:underline transition-colors"
                     >
-                      ✏️ Edit
+                      Edit
                     </button>
                   )}
-                  {isOwn && onDelete && (
+                  {onDelete && (
                     <button
+                      type="button"
                       onClick={() => onDelete(message.id)}
-                      className="text-xs font-semibold text-slate-500 hover:text-red-600 transition-colors"
+                      className="text-xs font-semibold text-gray-500 hover:text-red-600 hover:underline transition-colors"
                     >
-                      🗑️ Delete
+                      Remove
                     </button>
                   )}
                 </div>
@@ -345,5 +402,6 @@ export function MessageItem({
         </div>
       </div>
     </div>
+    </DevBoundary>
   );
 }

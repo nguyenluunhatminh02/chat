@@ -1,6 +1,9 @@
 import { cn } from '../../utils/cn';
 import { formatTime } from '../../utils/helpers';
 import type { User } from '../../types';
+import { DevBoundary } from '../DevTools';
+import { useQuery } from '@tanstack/react-query';
+import * as api from '../../lib/api';
 
 interface ConversationItemProps {
   id: string;
@@ -19,8 +22,7 @@ interface ConversationItemProps {
 }
 
 export function ConversationItem({
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  id: _id,
+  id,
   title,
   type,
   members,
@@ -30,6 +32,16 @@ export function ConversationItem({
   users,
   currentUserId,
 }: ConversationItemProps) {
+  // Fetch unread count for this conversation
+  const { data: unreadData } = useQuery({
+    queryKey: ['unread', currentUserId, id],
+    queryFn: () => api.getUnreadCount(currentUserId, id),
+    enabled: !!currentUserId && !!id,
+    refetchInterval: 30000, // Refetch every 30 seconds
+  });
+
+  const unreadCount = unreadData?.unread || 0;
+
   const getDisplayTitle = () => {
     if (title) return title;
     if (type === 'DIRECT') {
@@ -84,69 +96,65 @@ export function ConversationItem({
   };
 
   return (
+    <DevBoundary 
+          name="ConversationItem" 
+          filePath="src/components/chat/ConversationItem.tsx"
+        >
     <div
       className={cn(
-        'group relative flex cursor-pointer items-center gap-3 px-4 py-3 transition-all duration-200',
-        'hover:bg-white/60 active:scale-[0.98]',
-        isSelected 
-          ? 'bg-white shadow-md' 
-          : 'bg-transparent'
+        'group relative flex cursor-pointer items-center gap-3 px-3 py-2.5 transition-all duration-150',
+        'hover:bg-gray-100 active:bg-gray-200',
+        isSelected && 'bg-gray-100'
       )}
       onClick={onClick}
     >
-      {/* Selection Indicator */}
-      {isSelected && (
-        <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-indigo-500 to-purple-600 rounded-r-full" />
-      )}
-      
-      {/* Avatar with Gradient - Responsive */}
+      {/* Avatar - Messenger circular style */}
       <div className="flex-shrink-0 relative">
         <div className={cn(
-          'h-11 w-11 sm:h-12 sm:w-12 rounded-xl sm:rounded-2xl bg-gradient-to-br flex items-center justify-center',
-          'text-white font-bold text-xs sm:text-sm shadow-lg transform transition-transform group-hover:scale-105',
+          'h-14 w-14 rounded-full bg-gradient-to-br flex items-center justify-center',
+          'text-white font-semibold text-base shadow-sm',
           getAvatarGradient()
         )}>
           {getInitials()}
         </div>
         {/* Online indicator for DIRECT chats */}
         {type === 'DIRECT' && (
-          <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 sm:w-3.5 sm:h-3.5 bg-emerald-500 border-2 border-white rounded-full" />
+          <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 border-2 border-white rounded-full"></div>
         )}
       </div>
       
-      {/* Content */}
+      {/* Content - Messenger style */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between mb-1">
-          <h3 className={cn(
-            'text-[15px] font-semibold truncate',
-            isSelected ? 'text-gray-900' : 'text-gray-800'
-          )}>
+        <div className="flex items-center justify-between mb-0.5">
+          <h3 className="text-[15px] font-semibold truncate text-gray-900">
             {getDisplayTitle()}
           </h3>
-          {lastMessage && (
-            <span className="text-[11px] font-medium text-gray-500 ml-2">
-              {formatTime(lastMessage.createdAt)}
-            </span>
-          )}
+          <div className="flex items-center gap-2 ml-2 flex-shrink-0">
+            {lastMessage && (
+              <span className="text-[12px] text-gray-500">
+                {formatTime(lastMessage.createdAt)}
+              </span>
+            )}
+            {unreadCount > 0 && (
+              <div className="bg-[#0084ff] text-white text-[11px] font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center">
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </div>
+            )}
+          </div>
         </div>
         
         <p className={cn(
-          'text-[13px] truncate leading-tight',
-          isSelected ? 'text-gray-600' : 'text-gray-500'
+          "text-[13px] truncate",
+          unreadCount > 0 ? "text-gray-900 font-semibold" : "text-gray-600"
         )}>
           {lastMessage ? (
-            <>
-              <span className="font-semibold">{lastMessage.user.name || lastMessage.user.email.split('@')[0]}</span>
-              <span className="text-gray-400 mx-1">·</span>
-              <span>{getLastMessagePreview()}</span>
-            </>
+            <span>{getLastMessagePreview()}</span>
           ) : (
-            <span className="italic">Start a conversation</span>
+            <span className="text-gray-400">No messages yet</span>
           )}
         </p>
       </div>
-      
-      {/* Unread badge - Future feature */}
     </div>
+    </DevBoundary>
   );
 }

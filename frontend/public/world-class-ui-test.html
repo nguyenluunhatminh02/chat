@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🌍 UI Test - World-Class Chat</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    * {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    
+    body {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+      background-size: 400% 400%;
+      animation: gradient-shift 20s ease infinite;
+    }
+    
+    @keyframes gradient-shift {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+    
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+    
+    .animate-slideUp {
+      animation: slideUp 400ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    
+    .animate-fadeIn {
+      animation: fadeIn 300ms ease-out;
+    }
+    
+    @keyframes pulse-ring {
+      0% {
+        transform: scale(0.95);
+        opacity: 0.8;
+      }
+      70% {
+        transform: scale(1.1);
+        opacity: 0;
+      }
+      100% {
+        transform: scale(1.1);
+        opacity: 0;
+      }
+    }
+    
+    .animate-pulse-ring {
+      animation: pulse-ring 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    
+    .glassmorphism {
+      background: rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+    }
+    
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+      width: 10px;
+    }
+    
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.5);
+      border-radius: 12px;
+      border: 2px solid transparent;
+      background-clip: padding-box;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(100, 116, 139, 0.7);
+    }
+  </style>
+</head>
+<body class="min-h-screen p-8">
+  <div class="max-w-7xl mx-auto space-y-8">
+    <!-- Header -->
+    <div class="glassmorphism rounded-[32px] p-8 shadow-2xl animate-slideUp">
+      <h1 class="text-5xl font-black text-white mb-3 tracking-tight">
+        🌍 World-Class UI Test
+      </h1>
+      <p class="text-xl text-white/90 font-medium">
+        Messenger-style message bubbles với đuôi tự nhiên
+      </p>
+    </div>
+
+    <!-- Chat Demo -->
+    <div class="glassmorphism rounded-[32px] p-8 shadow-2xl animate-slideUp" style="animation-delay: 100ms">
+      <h2 class="text-2xl font-bold text-white mb-6">💬 Message Bubbles Demo</h2>
+      
+      <div class="space-y-6">
+        <!-- Other's message -->
+        <div class="flex justify-start">
+          <div class="flex gap-3 max-w-[75%]">
+            <!-- Avatar -->
+            <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center text-white font-bold text-sm shadow-lg flex-shrink-0">
+              M1
+            </div>
+            
+            <div class="flex flex-col items-start">
+              <div class="flex items-center gap-2 mb-1.5">
+                <p class="text-sm font-semibold text-white/90">minh1</p>
+                <p class="text-xs font-medium text-white/60">9h ago</p>
+              </div>
+              
+              <!-- Message bubble with tail -->
+              <div class="relative">
+                <!-- Tail -->
+                <span class="absolute -bottom-1 left-0 -translate-x-[10px] w-4 h-4 rounded-full bg-white opacity-90"></span>
+                
+                <!-- Bubble -->
+                <div class="relative rounded-[28px] px-5 py-3.5 bg-white text-gray-900 shadow-xl shadow-gray-900/10 ring-1 ring-gray-200/70">
+                  <p class="text-[15px] leading-relaxed">da</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Own message -->
+        <div class="flex justify-end">
+          <div class="flex flex-row-reverse gap-3 max-w-[75%]">
+            <!-- Avatar -->
+            <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-pink-500 to-rose-600 flex items-center justify-center text-white font-bold text-sm shadow-lg flex-shrink-0">
+              M2
+            </div>
+            
+            <div class="flex flex-col items-end">
+              <div class="flex flex-row-reverse items-center gap-2 mb-1.5">
+                <p class="text-sm font-semibold text-white/90">minh2</p>
+                <p class="text-xs font-medium text-white/60">8h ago</p>
+              </div>
+              
+              <!-- Message bubble with tail -->
+              <div class="relative">
+                <!-- Tail -->
+                <span class="absolute -bottom-1 right-0 translate-x-[10px] w-4 h-4 rounded-full bg-gradient-to-br from-[#0084ff] to-[#00a6ff] opacity-90"></span>
+                
+                <!-- Bubble -->
+                <div class="relative rounded-[28px] px-5 py-3.5 bg-gradient-to-tr from-[#0084ff] to-[#00a6ff] text-white shadow-xl shadow-blue-500/30 ring-1 ring-white/20 transform hover:shadow-2xl hover:shadow-blue-500/40 transition-all duration-300">
+                  <p class="text-[15px] leading-relaxed">da</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Reply button demo -->
+        <div class="flex justify-start">
+          <div class="flex gap-3 max-w-[75%]">
+            <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center text-white font-bold text-sm shadow-lg flex-shrink-0">
+              M1
+            </div>
+            
+            <div class="flex flex-col items-start">
+              <div class="flex items-center gap-2 mb-1.5">
+                <p class="text-sm font-semibold text-white/90">minh1</p>
+                <p class="text-xs font-medium text-white/60">9h ago</p>
+              </div>
+              
+              <div class="relative">
+                <span class="absolute -bottom-1 left-0 -translate-x-[10px] w-4 h-4 rounded-full bg-white opacity-90"></span>
+                
+                <div class="relative rounded-[28px] px-5 py-3.5 bg-white text-gray-900 shadow-xl shadow-gray-900/10 ring-1 ring-gray-200/70">
+                  <p class="text-[15px] leading-relaxed">da</p>
+                </div>
+              </div>
+              
+              <!-- Reply button -->
+              <div class="mt-3 flex items-center gap-2.5">
+                <button type="button" class="inline-flex items-center gap-2 px-4 py-2 rounded-full font-bold text-sm bg-white/90 text-gray-700 hover:bg-white border border-gray-200 shadow-md hover:shadow-lg transition-all duration-300 transform hover:scale-105">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                  </svg>
+                  <span class="font-black">Reply</span>
+                </button>
+                
+                <!-- Add reaction -->
+                <button type="button" class="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/90 border border-gray-200/80 hover:border-indigo-300 text-gray-600 hover:text-indigo-600 shadow-md hover:shadow-lg transform hover:scale-110 transition-all duration-300">
+                  <svg class="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status -->
+    <div class="glassmorphism rounded-[32px] p-8 shadow-2xl text-center animate-slideUp" style="animation-delay: 200ms">
+      <div class="flex items-center justify-center gap-4 mb-4">
+        <div class="w-4 h-4 rounded-full bg-emerald-400 animate-pulse-ring"></div>
+        <p class="text-2xl font-black text-white">✅ World-Class UI Đã Sẵn Sàng!</p>
+      </div>
+      <p class="text-lg text-white/80 mb-6">
+        Message bubbles với đuôi tự nhiên, gradient xanh đẹp mắt, shadows đa tầng
+      </p>
+      <div class="flex items-center justify-center gap-6 text-sm font-bold text-white/70">
+        <span>🎨 Messenger-style</span>
+        <span>•</span>
+        <span>💫 60fps animations</span>
+        <span>•</span>
+        <span>🌈 Gradient effects</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

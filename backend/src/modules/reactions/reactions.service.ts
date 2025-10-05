@@ -6,6 +6,7 @@ import {
 import { ToggleReactionDto } from './dto/toggle-reaction.dto';
 import { MessagingGateway } from '../../websockets/messaging.gateway';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 
 @Injectable()
 export class ReactionsService {
@@ -59,16 +60,34 @@ export class ReactionsService {
       });
       return { removed: true };
     } else {
-      const r = await this.prisma.reaction.create({
-        data: { messageId: dto.messageId, userId, emoji: dto.emoji },
-      });
-      this.gw.emitToConversation(msg.conversationId, 'reaction.added', {
-        messageId: dto.messageId,
-        userId,
-        emoji: dto.emoji,
-        createdAt: r.createdAt,
-      });
-      return { added: true };
+      try {
+        const r = await this.prisma.reaction.create({
+          data: { messageId: dto.messageId, userId, emoji: dto.emoji },
+        });
+        this.gw.emitToConversation(msg.conversationId, 'reaction.added', {
+          messageId: dto.messageId,
+          userId,
+          emoji: dto.emoji,
+          createdAt: r.createdAt,
+        });
+        return { added: true };
+      } catch (error) {
+        // If unique constraint error (P2002), it means reaction was already created by another concurrent request
+        if (
+          error instanceof PrismaClientKnownRequestError &&
+          error.code === 'P2002'
+        ) {
+          // Just return as if it was added successfully
+          this.gw.emitToConversation(msg.conversationId, 'reaction.added', {
+            messageId: dto.messageId,
+            userId,
+            emoji: dto.emoji,
+            createdAt: new Date(),
+          });
+          return { added: true };
+        }
+        throw error;
+      }
     }
   }
 
