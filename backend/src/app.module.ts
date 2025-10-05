@@ -16,6 +16,8 @@ import { BullModule } from '@nestjs/bullmq';
 import { WebsocketsModule } from './websockets/websockets.module';
 import { BlocksModule } from './modules/blocks/blocks.module';
 import { ModerationModule } from './modules/moderation/moderation.module';
+import { PushModule } from './modules/push/push.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -42,6 +44,8 @@ import { ModerationModule } from './modules/moderation/moderation.module';
     WebsocketsModule,
     BlocksModule,
     ModerationModule,
+    PushModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}

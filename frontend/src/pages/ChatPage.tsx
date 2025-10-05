@@ -6,6 +6,7 @@ import { MessageInput } from '../components/chat/MessageInput';
 import { SearchModal } from '../components/chat/SearchModal';
 import { TypingIndicator } from '../components/chat/TypingIndicator';
 import { NewConversationModal } from '../components/chat/NewConversationModal';
+import { NotificationBanner } from '../components/NotificationBanner';
 import { Button } from '../components/ui/Button';
 import { useAppContext } from '../hooks/useAppContext';
 import { useUsers } from '../hooks/useUsers';
@@ -468,9 +469,10 @@ export function ChatPage() {
     }, 500);
   };
 
-  const getUserById = (userId: string): User | undefined => {
+  // Memoize user lookup to prevent re-renders
+  const getUserById = useCallback((userId: string): User | undefined => {
     return (users as User[]).find((u: User) => u.id === userId);
-  };
+  }, [users]);
   
   // Edit message handler
   const handleEdit = async (messageId: string, newContent: string) => {
@@ -668,13 +670,17 @@ export function ChatPage() {
   }
 
   return (
-    <div className="flex h-screen bg-white">
-      {/* 🎨 Sidebar - Messenger Style */}
-      <div className={cn(
-        "md:flex md:w-80 lg:w-96 bg-white border-r border-gray-200 flex-col shadow-lg z-50",
-        "fixed md:relative inset-y-0 left-0 transform transition-all duration-300 ease-out",
-        sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
-      )}>
+    <div className="flex flex-col h-screen bg-white">
+      {/* Notification Banner */}
+      <NotificationBanner />
+      
+      <div className="flex flex-1 overflow-hidden">
+        {/* 🎨 Sidebar - Messenger Style */}
+        <div className={cn(
+          "md:flex md:w-80 lg:w-96 bg-white border-r border-gray-200 flex-col shadow-lg z-50",
+          "fixed md:relative inset-y-0 left-0 transform transition-all duration-300 ease-out",
+          sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+        )}>
         <div className="p-4 border-b border-gray-200">
           {/* Close button - Mobile only */}
           <button
@@ -826,12 +832,6 @@ export function ChatPage() {
                 <div className="space-y-1 flex flex-col-reverse">
                   {messages.map((message: Message) => {
                     const user = getUserById(message.senderId);
-                    console.log('🔥 Message user lookup:', { 
-                      messageId: message.id, 
-                      senderId: message.senderId,
-                      user,
-                      allUsers: users 
-                    });
                     return (
                       <MessageItem
                         key={message.id}
@@ -912,6 +912,7 @@ export function ChatPage() {
         onOpenChange={setNewConvOpen}
         onCreateConversation={handleCreateConversation}
       />
+      </div>
     </div>
   );
 }

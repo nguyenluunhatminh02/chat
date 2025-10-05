@@ -5,6 +5,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { MessagingGateway } from 'src/websockets/messaging.gateway';
 import { SearchService } from 'src/modules/search/search.service';
+import { NotificationsService } from 'src/modules/notifications/notifications.service';
 
 @Processor('outbox')
 @Injectable()
@@ -13,6 +14,7 @@ export class OutboxProcessor extends WorkerHost {
     private prisma: PrismaService,
     private gw: MessagingGateway,
     private search: SearchService,
+    private notifications: NotificationsService,
   ) {
     super();
   }
@@ -33,6 +35,10 @@ export class OutboxProcessor extends WorkerHost {
 
         // 2) search
         await this.indexMessage(msg.id);
+
+        // 3) push notifications to offline members
+        await this.notifications.fanoutNewMessage(conversationId, messageId);
+
         return;
       }
       case 'messaging.message_updated':

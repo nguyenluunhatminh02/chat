@@ -32,6 +32,21 @@ export function ConversationItem({
   users,
   currentUserId,
 }: ConversationItemProps) {
+  // Get other user ID for DIRECT chats
+  const otherUserId = type === 'DIRECT' 
+    ? members.find(m => m.userId !== currentUserId)?.userId 
+    : null;
+
+  // Fetch presence status for the other user in DIRECT chats
+  const { data: presenceData } = useQuery<{ userId: string; online: boolean; lastSeen: string | null }>({
+    queryKey: ['presence', otherUserId],
+    queryFn: () => otherUserId ? api.getPresence(otherUserId) : null,
+    enabled: type === 'DIRECT' && !!otherUserId,
+    refetchInterval: 10000, // Refetch every 10 seconds
+  });
+
+  const isOnline = presenceData?.online ?? false;
+
   // Fetch unread count for this conversation
   const { data: unreadData } = useQuery({
     queryKey: ['unread', currentUserId, id],
@@ -117,9 +132,12 @@ export function ConversationItem({
         )}>
           {getInitials()}
         </div>
-        {/* Online indicator for DIRECT chats */}
+        {/* Online/Offline indicator for DIRECT chats */}
         {type === 'DIRECT' && (
-          <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 border-2 border-white rounded-full"></div>
+          <div className={cn(
+            "absolute bottom-0 right-0 w-4 h-4 border-2 border-white rounded-full",
+            isOnline ? "bg-green-500" : "bg-red-500"
+          )}></div>
         )}
       </div>
       

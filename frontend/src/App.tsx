@@ -9,6 +9,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { ShadcnDemo } from './components/ShadcnDemo';
 import { testAPI } from './utils/test-api';
 import { DevTools } from './components/DevTools';
+import { usePushNotifications } from './hooks/usePushNotifications';
 
 // Make testAPI available globally for debugging
 declare global {
@@ -18,12 +19,19 @@ declare global {
 }
 window.testAPI = testAPI;
 
-function App() {
+function AppContent() {
+  // Register push notifications for current user
+  const push = usePushNotifications();
+
+  // Log push status (optional - for debugging)
+  if (push.error) {
+    console.warn('Push notifications error:', push.error);
+  }
+
   return (
-    <QueryProvider>
-      <AppProvider>
-        <DevTools /> {/* 🔧 Dev Mode: Press "D" to toggle */}
-        <Router>
+    <>
+      <DevTools /> {/* 🔧 Dev Mode: Press "D" to toggle */}
+      <Router>
           <div className="h-screen">
             <Routes>
               <Route path="/" element={<LoginPage />} />
@@ -49,6 +57,15 @@ function App() {
             </Routes>
           </div>
         </Router>
+      </>
+  );
+}
+
+function App() {
+  return (
+    <QueryProvider>
+      <AppProvider>
+        <AppContent />
       </AppProvider>
     </QueryProvider>
   );

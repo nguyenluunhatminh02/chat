@@ -4,10 +4,19 @@ import { SearchController } from './search.controller';
 import { SearchIndexProcessor } from './search-index.processor';
 import { BullModule } from '@nestjs/bullmq';
 import { OutboxProcessor } from '../outbox/outbox.processor';
+import { NotificationsService } from '../notifications/notifications.service';
+import { PresenceService } from '../presence/presence.service';
+import { PushService } from '../push/push.service';
 
 @Module({
   imports: [BullModule.registerQueue({ name: 'outbox' })],
-  providers: [SearchService, OutboxProcessor],
+  providers: [
+    SearchService,
+    OutboxProcessor,
+    NotificationsService,
+    PresenceService,
+    PushService,
+  ],
   controllers: [SearchController],
   exports: [SearchService],
 })
