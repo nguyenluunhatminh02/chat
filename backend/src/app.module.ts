@@ -14,6 +14,8 @@ import { FilesModule } from './modules/files/files.module';
 import { SearchModule } from './modules/search/search.module';
 import { BullModule } from '@nestjs/bullmq';
 import { WebsocketsModule } from './websockets/websockets.module';
+import { BlocksModule } from './modules/blocks/blocks.module';
+import { ModerationModule } from './modules/moderation/moderation.module';
 
 @Module({
   imports: [
@@ -38,6 +40,8 @@ import { WebsocketsModule } from './websockets/websockets.module';
     FilesModule,
     SearchModule,
     WebsocketsModule,
+    BlocksModule,
+    ModerationModule,
   ],
 })
 export class AppModule {}

@@ -4,6 +4,8 @@ import { formatTime } from '../../utils/helpers';
 import { tryParseFileContent } from '../../utils/file';
 import { ReactionPicker } from './ReactionPicker';
 import { ThreadPanel } from './ThreadPanel';
+import { ReportMessageModal } from './ReportMessageModal';
+import { BlockUserModal } from './BlockUserModal';
 import { DevBoundary } from '../DevTools';
 import type { Message, User } from '../../types';
 
@@ -76,6 +78,8 @@ export function MessageItem({
 }: MessageItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState('');
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [blockModalOpen, setBlockModalOpen] = useState(false);
   
   const fileContent = tryParseFileContent(message.content);
   const isDeleted = message.deletedAt;
@@ -361,26 +365,57 @@ export function MessageItem({
                 )}
               </div>
               
-              {/* ✏️ Edit/Delete buttons - Messenger style */}
-              {!isEditing && isOwn && (
+              {/* ✏️ Action buttons - Messenger style */}
+              {!isEditing && (
                 <div className="mt-1 flex items-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {onEdit && (
-                    <button
-                      type="button"
-                      onClick={handleStartEdit}
-                      className="text-xs font-semibold text-gray-500 hover:text-gray-700 hover:underline transition-colors"
-                    >
-                      Edit
-                    </button>
+                  {/* Own message actions */}
+                  {isOwn && (
+                    <>
+                      {onEdit && (
+                        <button
+                          type="button"
+                          onClick={handleStartEdit}
+                          className="text-xs font-semibold text-gray-500 hover:text-gray-700 hover:underline transition-colors"
+                        >
+                          Edit
+                        </button>
+                      )}
+                      {onDelete && (
+                        <button
+                          type="button"
+                          onClick={() => onDelete(message.id)}
+                          className="text-xs font-semibold text-gray-500 hover:text-red-600 hover:underline transition-colors"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </>
                   )}
-                  {onDelete && (
-                    <button
-                      type="button"
-                      onClick={() => onDelete(message.id)}
-                      className="text-xs font-semibold text-gray-500 hover:text-red-600 hover:underline transition-colors"
-                    >
-                      Remove
-                    </button>
+                  
+                  {/* Other user's message actions */}
+                  {!isOwn && user && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setReportModalOpen(true)}
+                        className="text-xs font-semibold text-gray-500 hover:text-red-600 hover:underline transition-colors flex items-center gap-1"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        Report
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBlockModalOpen(true)}
+                        className="text-xs font-semibold text-gray-500 hover:text-red-600 hover:underline transition-colors flex items-center gap-1"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                        </svg>
+                        Block User
+                      </button>
+                    </>
                   )}
                 </div>
               )}
@@ -402,6 +437,24 @@ export function MessageItem({
         </div>
       </div>
     </div>
+
+    {/* Moderation Modals */}
+    {!isOwn && user && (
+      <>
+        <ReportMessageModal
+          open={reportModalOpen}
+          onOpenChange={setReportModalOpen}
+          messageId={message.id}
+          messageContent={message.content || undefined}
+        />
+        <BlockUserModal
+          open={blockModalOpen}
+          onOpenChange={setBlockModalOpen}
+          userId={user.id}
+          userName={user.name || user.email}
+        />
+      </>
+    )}
     </DevBoundary>
   );
 }

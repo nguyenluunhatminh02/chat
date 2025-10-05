@@ -174,3 +174,92 @@ model Attachment {
 
   @@unique([messageId, fileId])
 }
+
+// ============ PHẦN 17: MODERATION ============
+
+enum ReportStatus { 
+  OPEN 
+  RESOLVED 
+  REJECTED 
+}
+
+enum ReportType { 
+  MESSAGE 
+  USER 
+  CONVERSATION 
+}
+
+enum ReportReason { 
+  SPAM 
+  ABUSE 
+  NSFW 
+  HARASSMENT 
+  OTHER 
+}
+
+model Report {
+  id                   String        @id @default(cuid())
+  reporterId           String
+  type                 ReportType
+  targetMessageId      String?
+  targetUserId         String?
+  targetConversationId String?
+  reason               ReportReason
+  details              String?
+  evidence             Json?
+  status               ReportStatus  @default(OPEN)
+  action               String?       // NONE | DELETE_MESSAGE | BLOCK_USER
+  resolutionNotes      String?
+  resolvedById         String?
+  createdAt            DateTime      @default(now())
+  resolvedAt           DateTime?
+
+  @@index([status, createdAt])
+  @@index([reporterId])
+}
+
+model Block {
+  blockerId     String
+  blockedUserId String
+  createdAt     DateTime @default(now())
+  expiresAt     DateTime?
+
+  @@id([blockerId, blockedUserId])
+  @@index([blockedUserId])
+  @@index([blockerId])
+}
+
+model ConversationBan {
+  conversationId String
+  userId         String
+  bannedBy       String
+  reason         String?
+  createdAt      DateTime  @default(now())
+  expiresAt      DateTime?
+
+  @@id([conversationId, userId])
+  @@index([userId])
+  @@index([conversationId])
+}
+
+enum AppealStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Appeal {
+  id          String       @id @default(cuid())
+  userId      String
+  reportId    String?
+  banId       String?      // format: "conversationId:userId" for ConversationBan
+  reason      String
+  status      AppealStatus @default(PENDING)
+  reviewedBy  String?
+  reviewNotes String?
+  createdAt   DateTime     @default(now())
+  reviewedAt  DateTime?
+
+  @@index([status, createdAt])
+  @@index([userId])
+}

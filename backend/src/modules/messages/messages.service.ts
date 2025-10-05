@@ -9,6 +9,8 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { MessagingGateway } from 'src/websockets/messaging.gateway';
 import { UpdateMessageDto } from './dto/update-message.dto';
 import { OutboxProducer } from '../outbox/outbox.producer';
+import { BlocksService } from '../blocks/blocks.service';
+import { ModerationService } from '../moderation/moderation.service';
 
 @Injectable()
 export class MessagesService {
@@ -16,6 +18,8 @@ export class MessagesService {
     private prisma: PrismaService,
     private gateway: MessagingGateway,
     private outbox: OutboxProducer,
+    private blocks: BlocksService,
+    private moderation: ModerationService,
   ) {}
 
   async list(
@@ -43,6 +47,30 @@ export class MessagesService {
       select: { id: true },
     });
     if (!member) throw new ForbiddenException('Not a member');
+
+    // NEW: Check if user is banned from this conversation
+    const isBanned = await this.moderation.isBanned(dto.conversationId, userId);
+    if (isBanned) {
+      throw new ForbiddenException('You are banned from this conversation');
+    }
+
+    // NEW: Check block for DIRECT conversations
+    const convo = await this.prisma.conversation.findUnique({
+      where: { id: dto.conversationId },
+      select: { type: true },
+    });
+    if (convo?.type === 'DIRECT') {
+      const members = await this.prisma.conversationMember.findMany({
+        where: { conversationId: dto.conversationId },
+        select: { userId: true },
+      });
+      const otherId = members.find((m) => m.userId !== userId)?.userId;
+      if (otherId && (await this.blocks.isBlockedEither(userId, otherId))) {
+        throw new ForbiddenException(
+          'Messaging is blocked between these users',
+        );
+      }
+    }
 
     // ✅ Nếu là reply thì kiểm tra parent hợp lệ
     if (dto.parentId) {
