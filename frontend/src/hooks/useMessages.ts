@@ -16,6 +16,10 @@ export function useMessages(conversationId: string, cursor?: string) {
       }
     },
     enabled: !!conversationId,
+    // Avoid flicker on pagination / changes
+    placeholderData: (prev) => prev,
+    // Keep referential equality when data structurally equal
+    structuralSharing: true,
   });
 }
 

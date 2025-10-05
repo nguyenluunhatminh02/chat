@@ -1,12 +1,12 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ConversationItem } from '../components/chat/ConversationItem';
 import { MessageItem } from '../components/chat/MessageItem';
 import { MessageInput } from '../components/chat/MessageInput';
-import { SearchModal } from '../components/chat/SearchModal';
+const SearchModal = lazy(() => import('../components/chat/SearchModal').then(m => ({ default: m.SearchModal })));
 import { TypingIndicator } from '../components/chat/TypingIndicator';
 import { NewConversationModal } from '../components/chat/NewConversationModal';
-import { PinnedMessagesPanel } from '../components/chat/PinnedMessagesPanel';
+const PinnedMessagesPanel = lazy(() => import('../components/chat/PinnedMessagesPanel').then(m => ({ default: m.PinnedMessagesPanel })));
 import { BlockedBanner } from '../components/chat/BlockedBanner';
 import { NotificationBanner } from '../components/NotificationBanner';
 import { Button } from '../components/ui/Button';
@@ -928,6 +928,14 @@ export function ChatPage() {
               {/* Header Action Buttons */}
               <div className="flex items-center gap-2">
                 <button
+                  onMouseEnter={() => {
+                    if (selectedConvId) {
+                      queryClient.prefetchQuery({
+                        queryKey: ['pins', selectedConvId, undefined],
+                        queryFn: () => import('../lib/pins').then(m => m.listPins({ conversationId: selectedConvId })),
+                      });
+                    }
+                  }}
                   onClick={() => setShowPinnedPanel(true)}
                   className="p-2 hover:bg-blue-50 rounded-full transition-all"
                   title="View pinned messages"
@@ -1026,6 +1034,7 @@ export function ChatPage() {
       </div>
 
       {/* Search Modal with Results */}
+      <Suspense fallback={null}>
       <SearchModal
         isOpen={searchOpen}
         onClose={() => setSearchOpen(false)}
@@ -1037,7 +1046,8 @@ export function ChatPage() {
         searchTotal={searchHook.total}
         searchError={searchHook.error}
         onJumpToMessage={handleJumpToMessage}
-      />
+  />
+      </Suspense>
 
       {/* New Conversation Modal */}
       <NewConversationModal
@@ -1048,6 +1058,7 @@ export function ChatPage() {
 
       {/* Pinned Messages Panel */}
       {showPinnedPanel && selectedConvId && (
+        <Suspense fallback={null}>
         <PinnedMessagesPanel
           conversationId={selectedConvId}
           onClose={() => setShowPinnedPanel(false)}
@@ -1059,6 +1070,7 @@ export function ChatPage() {
           }}
           getUserById={getUserById}
         />
+        </Suspense>
       )}
 
 

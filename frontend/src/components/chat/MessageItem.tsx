@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { cn } from '../../utils/cn';
 import { formatTime } from '../../utils/helpers';
 import { tryParseFileContent } from '../../utils/file';
@@ -60,7 +60,7 @@ function getAvatarGradient(name: string): string {
   return gradients[Math.abs(hash) % gradients.length];
 }
 
-export function MessageItem({
+function MessageItemInner({
   message,
   user,
   isOwn,
@@ -123,6 +123,8 @@ export function MessageItem({
             <img
               src={fileContent.thumbUrl || fileContent.url}
               alt={fileContent.filename}
+              loading="lazy"
+              decoding="async"
               className="max-h-72 max-w-full rounded-xl object-contain shadow-md group-hover:shadow-xl transition-shadow"
             />
             <div className="mt-2 text-xs opacity-80 font-medium">
@@ -444,3 +446,30 @@ export function MessageItem({
     </DevBoundary>
   );
 }
+
+// Memoized to prevent unnecessary re-renders unless relevant props change
+export const MessageItem = memo(MessageItemInner, (prev, next) => {
+  return (
+    prev.message.id === next.message.id &&
+    prev.message.content === next.message.content &&
+    prev.message.deletedAt === next.message.deletedAt &&
+    prev.message.editedAt === next.message.editedAt &&
+    prev.isOwn === next.isOwn &&
+    prev.isPinned === next.isPinned &&
+    prev.replyCount === next.replyCount &&
+    prev.threadOpen === next.threadOpen &&
+    prev.threadInput === next.threadInput &&
+    // Shallow checks for handlers (assumed stable from parents via useCallback)
+    prev.onEdit === next.onEdit &&
+    prev.onDelete === next.onDelete &&
+    prev.onReact === next.onReact &&
+    prev.onEnsureReactions === next.onEnsureReactions &&
+    prev.onOpenThread === next.onOpenThread &&
+    prev.onThreadInputChange === next.onThreadInputChange &&
+    prev.onSendThreadReply === next.onSendThreadReply &&
+    // Reactions object can be large; if reference stable, assume unchanged
+    prev.reactions === next.reactions &&
+    // User minimal fields for avatar display
+    (prev.user?.id === next.user?.id && prev.user?.name === next.user?.name)
+  );
+});

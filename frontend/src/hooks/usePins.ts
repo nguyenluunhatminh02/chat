@@ -26,5 +26,7 @@ export function usePins(conversationId: string, params?: { limit?: number; curso
     queryKey: ['pins', conversationId, params],
     queryFn: () => pinsApi.listPins({ conversationId, ...params }),
     enabled: !!conversationId,
+    placeholderData: (prev) => prev,
+    structuralSharing: true,
   });
 }
