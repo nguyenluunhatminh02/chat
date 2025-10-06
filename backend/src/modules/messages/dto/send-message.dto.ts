@@ -9,6 +9,7 @@ export enum MessageTypeDto {
 export class SendMessageDto {
   @IsString() conversationId: string;
   @IsEnum(MessageTypeDto) type: MessageTypeDto = MessageTypeDto.TEXT;
-  @IsOptional() @IsString() content?: string;
+  @IsOptional() @IsString() content?: string | null;
   @IsOptional() @IsString() parentId?: string; // reply
+  @IsOptional() attachments?: { fileId: string }[];
 }

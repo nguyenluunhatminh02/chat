@@ -7,6 +7,7 @@ import { DevBoundary } from '../DevTools';
 interface MessageInputProps {
   onSend: (content: string, parentId?: string) => void;
   onFileUpload?: (file: File) => void;
+  onPasteImage?: (file: File) => void;
   placeholder?: string;
   replyingTo?: {
     id: string;
@@ -22,6 +23,7 @@ interface MessageInputProps {
 export function MessageInput({
   onSend,
   onFileUpload,
+  onPasteImage,
   placeholder = 'Type a message...',
   replyingTo,
   onCancelReply,
@@ -32,6 +34,7 @@ export function MessageInput({
   const [message, setMessage] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const [wasTyping, setWasTyping] = useState(false);
+  const [isPasting, setIsPasting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -114,6 +117,25 @@ export function MessageInput({
     setIsDragging(false);
   };
 
+  // Handle paste events for images
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const items = Array.from(e.clipboardData.items);
+    const imageItem = items.find((item) => item.type.startsWith('image/'));
+    
+    if (imageItem && onPasteImage) {
+      e.preventDefault();
+      const file = imageItem.getAsFile();
+      if (file) {
+        setIsPasting(true);
+        try {
+          await onPasteImage(file);
+        } finally {
+          setIsPasting(false);
+        }
+      }
+    }
+  };
+
   return (
     <DevBoundary 
               name="MessageInput" 
@@ -162,8 +184,9 @@ export function MessageInput({
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={placeholder}
-              disabled={disabled}
+              onPaste={handlePaste}
+              placeholder={isPasting ? 'Uploading image...' : placeholder}
+              disabled={disabled || isPasting}
               className="pr-12 rounded-full border-2 border-gray-200 bg-white hover:border-gray-300 focus:border-[#0084ff] focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 py-2.5 px-4 text-[15px] transition-all shadow-sm focus:shadow-md"
             />
             

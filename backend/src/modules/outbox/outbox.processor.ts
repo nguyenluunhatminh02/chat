@@ -6,6 +6,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { MessagingGateway } from 'src/websockets/messaging.gateway';
 import { SearchService } from 'src/modules/search/search.service';
 import { NotificationsService } from 'src/modules/notifications/notifications.service';
+import { LinkPreviewService } from 'src/modules/link-preview/link-preview.service';
 
 @Processor('outbox')
 @Injectable()
@@ -15,6 +16,7 @@ export class OutboxProcessor extends WorkerHost {
     private gw: MessagingGateway,
     private search: SearchService,
     private notifications: NotificationsService,
+    private linkPreview: LinkPreviewService,
   ) {
     super();
   }
@@ -38,6 +40,26 @@ export class OutboxProcessor extends WorkerHost {
 
         // 3) push notifications to offline members
         await this.notifications.fanoutNewMessage(conversationId, messageId);
+
+        // 4) 👤 mentions: emit mention.created events to mentioned users
+        const ments = await this.prisma.mention.findMany({
+          where: { messageId },
+          select: { userId: true },
+        });
+        if (ments.length > 0) {
+          const snippet = (msg.content ?? '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .substring(0, 100);
+          for (const it of ments) {
+            this.gw.emitToUser(it.userId, 'mention.created', {
+              conversationId,
+              messageId,
+              senderId: msg.senderId,
+              snippet,
+            });
+          }
+        }
 
         return;
       }
@@ -77,6 +99,54 @@ export class OutboxProcessor extends WorkerHost {
         };
         this.gw.emitToConversation(conversationId, 'pin.removed', {
           messageId,
+        });
+        return;
+      }
+      case 'conversation.read': {
+        const { conversationId, userId, at, messageId } = job.data as {
+          conversationId: string;
+          userId: string;
+          at: string;
+          messageId?: string | null;
+        };
+        this.gw.emitToConversation(conversationId, 'conversation.read', {
+          conversationId,
+          userId,
+          at,
+          messageId: messageId ?? null,
+        });
+        return;
+      }
+      case 'conversation.created': {
+        const { conversation, memberIds } = job.data as {
+          conversation: any;
+          memberIds: string[];
+        };
+        console.log('🔥 [Outbox] Emitting conversation.created event', {
+          conversationId: conversation?.id,
+          memberIds,
+        });
+        // Emit to all members
+        this.gw.emitToUsers(memberIds, 'conversation.created', {
+          conversation,
+          memberIds,
+        });
+        return;
+      }
+      case 'preview.request': {
+        const { conversationId, messageId, urls } = job.data as {
+          conversationId: string;
+          messageId: string;
+          urls: string[];
+        };
+        const previews: any[] = [];
+        for (const u of urls) {
+          previews.push(await this.linkPreview.fetch(u));
+        }
+        // bắn realtime cho cả room
+        this.gw.emitToConversation(conversationId, 'preview.ready', {
+          messageId,
+          previews,
         });
         return;
       }

@@ -5,12 +5,20 @@ import {
 } from './dto/create-conversation.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ConversationType } from 'generated/prisma';
+import { OutboxProducer } from '../outbox/outbox.producer';
 
 @Injectable()
 export class ConversationsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private outbox: OutboxProducer,
+  ) {}
 
-  async create(creatorId: string, dto: CreateConversationDto) {
+  async create(
+    creatorId: string,
+    dto: CreateConversationDto,
+    workspaceId: string,
+  ) {
     if (dto.type === ConversationTypeDto.DIRECT && dto.members.length !== 1) {
       throw new BadRequestException('DIRECT cần đúng 1 thành viên');
     }
@@ -20,6 +28,7 @@ export class ConversationsService {
         type: dto.type as unknown as ConversationType,
         title: dto.title ?? null,
         createdById: creatorId,
+        workspaceId,
         members: {
           create: [
             { userId: creatorId, role: 'OWNER' as any },
@@ -29,12 +38,31 @@ export class ConversationsService {
       },
       include: { members: true },
     });
+
+    // Emit realtime event for all members
+    const allMemberIds = [creatorId, ...dto.members];
+    console.log(
+      '🔥 [ConversationsService] Emitting conversation.created to outbox',
+      {
+        conversationId: conv.id,
+        type: dto.type,
+        memberIds: allMemberIds,
+      },
+    );
+    await this.outbox.emit('conversation.created', {
+      conversation: conv,
+      memberIds: allMemberIds,
+    });
+
     return conv;
   }
 
-  async listForUser(userId: string) {
+  async listForUser(userId: string, workspaceId: string) {
     const conversations = await this.prisma.conversation.findMany({
-      where: { members: { some: { userId } } },
+      where: {
+        members: { some: { userId } },
+        workspaceId,
+      },
       orderBy: { updatedAt: 'desc' },
       include: { members: true },
     });

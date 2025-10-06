@@ -28,16 +28,27 @@ export async function createUser(body: { email: string; name?: string }) {
 
 /* ========== Conversations ========== */
 export async function listConversations(userId: string) {
-  const res = await http('/conversations', { headers: { 'X-User-Id': userId } });
+  const workspaceId = localStorage.getItem('x-workspace-id') || 'ws_default';
+  const res = await http('/conversations', { 
+    headers: { 
+      'X-User-Id': userId,
+      'X-Workspace-Id': workspaceId,
+    } 
+  });
   return json(res);
 }
 export async function createConversation(
   userId: string,
   body: { type: 'DIRECT' | 'GROUP'; title?: string; members: string[] }
 ) {
+  const workspaceId = localStorage.getItem('x-workspace-id') || 'ws_default';
   const res = await http('/conversations', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-User-Id': userId },
+    headers: { 
+      'Content-Type': 'application/json', 
+      'X-User-Id': userId,
+      'X-Workspace-Id': workspaceId,
+    },
     body: JSON.stringify(body),
   });
   return json(res);
@@ -234,34 +245,7 @@ export async function getMessagesAround(
 }
 
 /* ========== Receipts (Read Status) ========== */
-export async function markMessageRead(
-  userId: string,
-  conversationId: string,
-  messageId: string
-) {
-  const res = await http('/receipts/read', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-User-Id': userId },
-    body: JSON.stringify({ conversationId, messageId }),
-  });
-  return json<{
-    ok: boolean;
-    conversationId: string;
-    messageId: string;
-    readAt: string;
-  }>(res);
-}
-
-export async function getUnreadCount(userId: string, conversationId: string) {
-  const res = await http(`/receipts/unread/${conversationId}`, {
-    headers: { 'X-User-Id': userId },
-  });
-  return json<{
-    conversationId: string;
-    unread: number;
-    since: string;
-  }>(res);
-}
+// NOTE: Moved to lib/reads.ts - using /reads endpoints instead of /receipts
 
 /* ========== Typing Indicators ========== */
 export async function getTypingUsers(conversationId: string) {
@@ -369,6 +353,37 @@ export async function unsubscribePush(endpoint: string) {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ endpoint }),
+  });
+  return json(res);
+}
+
+/* ========== Analytics ========== */
+export async function getAnalyticsActive(userId: string, workspaceId: string, params: URLSearchParams) {
+  const res = await http(`/analytics/active?${params}`, {
+    headers: {
+      'X-User-Id': userId,
+      'X-Workspace-Id': workspaceId,
+    },
+  });
+  return json(res);
+}
+
+export async function getAnalyticsRetention(userId: string, workspaceId: string, params: URLSearchParams) {
+  const res = await http(`/analytics/retention?${params}`, {
+    headers: {
+      'X-User-Id': userId,
+      'X-Workspace-Id': workspaceId,
+    },
+  });
+  return json(res);
+}
+
+export async function getAnalyticsTopConversations(userId: string, workspaceId: string, params: URLSearchParams) {
+  const res = await http(`/analytics/top-conversations?${params}`, {
+    headers: {
+      'X-User-Id': userId,
+      'X-Workspace-Id': workspaceId,
+    },
   });
   return json(res);
 }

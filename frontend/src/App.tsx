@@ -6,11 +6,13 @@ import { ChatPage } from './pages/ChatPage';
 import { LoginPage } from './pages/LoginPage';
 import { DebugPage } from './pages/DebugPage';
 import { AdminPanel } from './pages/AdminPanel';
+import { AnalyticsPage } from './pages/AnalyticsPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { ShadcnDemo } from './components/ShadcnDemo';
 import { testAPI } from './utils/test-api';
 import { DevTools } from './components/DevTools';
 import { usePushNotifications } from './hooks/usePushNotifications';
+import { Toaster } from 'react-hot-toast';
 
 // Make testAPI available globally for debugging
 declare global {
@@ -31,6 +33,7 @@ function AppContent() {
 
   return (
     <>
+      <Toaster position="top-right" />
       <DevTools /> {/* 🔧 Dev Mode: Press "D" to toggle */}
       <Router>
           <div className="h-screen">
@@ -60,6 +63,14 @@ function AppContent() {
                 element={
                   <ProtectedRoute>
                     <ChatPage />
+                  </ProtectedRoute>
+                } 
+              />
+              <Route 
+                path="/analytics" 
+                element={
+                  <ProtectedRoute>
+                    <AnalyticsPage />
                   </ProtectedRoute>
                 } 
               />

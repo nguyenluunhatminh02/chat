@@ -6,8 +6,13 @@ import { MessageInput } from '../components/chat/MessageInput';
 const SearchModal = lazy(() => import('../components/chat/SearchModal').then(m => ({ default: m.SearchModal })));
 import { TypingIndicator } from '../components/chat/TypingIndicator';
 import { NewConversationModal } from '../components/chat/NewConversationModal';
+import { CreateGroupModal } from '../components/chat/CreateGroupModal';
+import { ExportModal } from '../components/chat/ExportModal';
 const PinnedMessagesPanel = lazy(() => import('../components/chat/PinnedMessagesPanel').then(m => ({ default: m.PinnedMessagesPanel })));
 import { BlockedBanner } from '../components/chat/BlockedBanner';
+import { WorkspaceSelector } from '../components/chat/WorkspaceSelector';
+import { UnreadBadge } from '../components/chat/UnreadBadge';
+import { ReadReceipts } from '../components/chat/ReadReceipts';
 import { NotificationBanner } from '../components/NotificationBanner';
 import { Button } from '../components/ui/Button';
 import { useAppContext } from '../hooks/useAppContext';
@@ -18,6 +23,7 @@ import { useSearch, type SearchHit } from '../hooks/useSearch';
 import { useTyping } from '../hooks/useTyping';
 import { usePins } from '../hooks/usePins';
 import { useBlockStatus } from '../hooks/useBlockStatus';
+import { useMarkRead } from '../hooks/useReads';
 import { generateId } from '../utils/helpers';
 import { cn } from '../utils/cn';
 import {
@@ -79,35 +85,44 @@ function MessagesRenderer({
   const pinnedMessageIds = useMemo(() => {
     return new Set(pinsData?.items?.map(p => p.message.id) || []);
   }, [pinsData]);
+  
+  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
 
   return (
     <div className="space-y-1 flex flex-col-reverse">
       {messages.map((message: Message) => {
         const user = getUserById(message.senderId);
         const isPinned = pinnedMessageIds.has(message.id);
+        const isLastMessage = lastMessage?.id === message.id;
 
         return (
-          <MessageItem
-            key={message.id}
-            message={message}
-            user={user}
-            isOwn={message.senderId === currentUserId}
-            onEdit={handleEdit}
-            onDelete={handleDelete}
-            onReact={emoji => handleToggleReaction(message.id, emoji)}
-            reactions={reactions[message.id]}
-            onEnsureReactions={() => ensureReactions(message.id)}
-            replyCount={replyCounts[message.id] || 0}
-            onOpenThread={() => handleOpenThread(message.id)}
-            threadOpen={openThreadId === message.id}
-            threadMessages={threadMap[message.id] || []}
-            threadInput={threadInput}
-            onThreadInputChange={setThreadInput}
-            onSendThreadReply={() => handleSendThreadReply(message.id, threadInput)}
-            getUserById={getUserById}
-            currentUserId={currentUserId}
-            isPinned={isPinned}
-          />
+          <div key={message.id}>
+            <MessageItem
+              message={message}
+              user={user}
+              isOwn={message.senderId === currentUserId}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+              onReact={emoji => handleToggleReaction(message.id, emoji)}
+              reactions={reactions[message.id]}
+              onEnsureReactions={() => ensureReactions(message.id)}
+              replyCount={replyCounts[message.id] || 0}
+              onOpenThread={() => handleOpenThread(message.id)}
+              threadOpen={openThreadId === message.id}
+              threadMessages={threadMap[message.id] || []}
+              threadInput={threadInput}
+              onThreadInputChange={setThreadInput}
+              onSendThreadReply={() => handleSendThreadReply(message.id, threadInput)}
+              getUserById={getUserById}
+              currentUserId={currentUserId}
+              isPinned={isPinned}
+            />
+            {isLastMessage && (
+              <div className="mt-1 ml-12">
+                <ReadReceipts messageId={message.id} getUserById={getUserById} />
+              </div>
+            )}
+          </div>
         );
       })}
     </div>
@@ -127,6 +142,8 @@ export function ChatPage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [newConvOpen, setNewConvOpen] = useState(false);
+  const [createGroupOpen, setCreateGroupOpen] = useState(false);
+  const [exportImportOpen, setExportImportOpen] = useState(false);
   const [showPinnedPanel, setShowPinnedPanel] = useState(false);
   
   // Presence state
@@ -167,10 +184,25 @@ export function ChatPage() {
   }, []);
 
   const { data: users = [] } = useUsers();
-  const { data: conversations = [] } = useConversations(currentUserId);
+  const { data: conversations = [], isLoading: conversationsLoading } = useConversations(currentUserId);
   const { data: messagesData, isLoading: messagesLoading, error: messagesError } = useMessages(selectedConvId);
   const sendMessageMutation = useSendMessage();
   const createConversationMutation = useCreateConversation();
+  const markReadMutation = useMarkRead();
+  
+  // 🐛 Debug: Log conversations changes
+  useEffect(() => {
+    const convList = conversations as Conversation[];
+    console.log('📋 Conversations updated:', {
+      count: convList.length,
+      items: convList.map((c: Conversation) => ({ 
+        id: c.id, 
+        type: c.type, 
+        title: c.title 
+      })),
+      loading: conversationsLoading
+    });
+  }, [conversations, conversationsLoading]);
   
   const selectedConv = (conversations as Conversation[]).find((c: Conversation) => c.id === selectedConvId);
   
@@ -239,6 +271,27 @@ export function ChatPage() {
     };
   }, [selectedConv, users, currentUserId, getDirectPeer]);
   
+  // Auto-mark-read effect (debounced 500ms after viewing conversation)
+  useEffect(() => {
+    if (!selectedConvId || !messagesData || messagesLoading) return;
+    
+    const messages = messagesData as Message[];
+    if (messages.length === 0) return;
+    
+    // Find the last message in the conversation
+    const lastMessage = messages[messages.length - 1];
+    if (!lastMessage || lastMessage.senderId === currentUserId) return;
+    
+    const timer = setTimeout(() => {
+      markReadMutation.mutate({
+        conversationId: selectedConvId,
+        opts: { messageId: lastMessage.id },
+      });
+    }, 500); // Debounce 500ms
+    
+    return () => clearTimeout(timer);
+  }, [selectedConvId, messagesData, messagesLoading, currentUserId, markReadMutation]);
+  
   // Wire realtime events for automatic updates
   useEffect(() => {
     if (!currentUserId) return;
@@ -258,7 +311,7 @@ export function ChatPage() {
       
       // Invalidate unread count for this conversation (if message is from someone else)
       if (msg.senderId !== currentUserId) {
-        queryClient.invalidateQueries({ queryKey: ['unread', currentUserId, msg.conversationId] });
+        queryClient.invalidateQueries({ queryKey: ['unread', msg.conversationId] });
       }
       
       // Update reply count if it's a thread reply
@@ -399,6 +452,45 @@ export function ChatPage() {
       queryClient.invalidateQueries({ queryKey: ['pins', selectedConvId] });
     };
 
+    const handleConversationRead = (data: { conversationId: string; messageId?: string }) => {
+      console.log('👁️ Conversation read:', data);
+      const { conversationId, messageId } = data;
+      
+      // Invalidate read receipts for this message
+      if (messageId) {
+        queryClient.invalidateQueries({ queryKey: ['readers', messageId] });
+      }
+      
+      // Invalidate unread count for this conversation
+      queryClient.invalidateQueries({ queryKey: ['unread', conversationId] });
+      queryClient.invalidateQueries({ queryKey: ['unreadSummary'] });
+    };
+
+    // Handle conversation created event
+    const handleConversationCreated = (data: { conversation?: Conversation; memberIds?: string[] }) => {
+      console.log('🔥 Realtime: conversation.created', data);
+      console.log('📋 Current userId:', currentUserId);
+      console.log('📋 Is member?', data.memberIds?.includes(currentUserId));
+      
+      // Check if current user is a member
+      const isMember = data.memberIds?.includes(currentUserId);
+      if (isMember) {
+        console.log('✅ User is member, invalidating conversations query');
+        // Invalidate AND refetch conversations list to show new conversation
+        queryClient.invalidateQueries({ 
+          queryKey: ['conversations', currentUserId],
+          refetchType: 'active' 
+        });
+        // Force immediate refetch
+        queryClient.refetchQueries({ 
+          queryKey: ['conversations', currentUserId],
+          exact: true 
+        });
+      } else {
+        console.log('❌ User is NOT a member, skipping invalidation');
+      }
+    };
+
     // Register event handlers
     realtime.on('message.created', handleMessageCreated);
     realtime.on('message.updated', handleMessageUpdated);
@@ -407,6 +499,8 @@ export function ChatPage() {
     realtime.on('reaction.removed', handleReactionRemoved);
     realtime.on('pin.added', handlePinAdded);
     realtime.on('pin.removed', handlePinRemoved);
+    realtime.on('conversation.read', handleConversationRead);
+    realtime.on('conversation.created', handleConversationCreated);
     
     return () => {
       realtime.off('message.created', handleMessageCreated);
@@ -416,6 +510,8 @@ export function ChatPage() {
       realtime.off('reaction.removed', handleReactionRemoved);
       realtime.off('pin.added', handlePinAdded);
       realtime.off('pin.removed', handlePinRemoved);
+      realtime.off('conversation.read', handleConversationRead);
+      realtime.off('conversation.created', handleConversationCreated);
     };
   }, [currentUserId, selectedConvId, queryClient, openThreadId]);
 
@@ -453,7 +549,7 @@ export function ChatPage() {
         await markMessageRead(currentUserId, selectedConvId, lastMessageFromOther.id);
         
         // Invalidate unread count
-        queryClient.invalidateQueries({ queryKey: ['unread', currentUserId, selectedConvId] });
+        queryClient.invalidateQueries({ queryKey: ['unread', selectedConvId] });
       } catch (err) {
         console.error('Failed to mark message as read:', err);
       }
@@ -554,6 +650,46 @@ export function ChatPage() {
       console.log('🔥 File upload completed successfully!');
     } catch (error) {
       console.error('🔥 File upload failed:', error);
+    }
+  };
+
+  // NEW: Handle paste image (PHẦN 30)
+  const handlePasteImage = async (file: File) => {
+    if (!selectedConvId || !currentUserId) return;
+
+    try {
+      console.log('📋 Pasting image:', file.name, file.type, file.size);
+      
+      const access = localStorage.getItem('access_token');
+      if (!access) {
+        throw new Error('Not authenticated');
+      }
+
+      // Use paste-image endpoint for fast upload
+      const formData = new FormData();
+      formData.append('file', file, file.name || 'paste.png');
+
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/messages/${selectedConvId}/paste-image`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${access}`,
+            'X-User-Id': currentUserId,
+            'X-Workspace-Id': localStorage.getItem('x-workspace-id') || '',
+          },
+          body: formData,
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Paste failed: ${response.status}`);
+      }
+
+      // Message will arrive via WebSocket
+      console.log('📋 Paste image uploaded successfully!');
+    } catch (error) {
+      console.error('📋 Paste image failed:', error);
     }
   };
 
@@ -759,19 +895,65 @@ export function ChatPage() {
 
     // Create new conversation
     // Note: Backend automatically adds currentUserId, so only pass other members
-    const result = await createConversationMutation.mutateAsync({
-      userId: currentUserId,
-      data: {
+    try {
+      const result = await createConversationMutation.mutateAsync({
         type,
         title,
         members, // Don't add currentUserId - backend handles it
-      },
-    });
+      });
 
-    // Select the new conversation and close modal
-    if (result && typeof result === 'object' && 'id' in result) {
-      setSelectedConvId((result as { id: string }).id);
-      setNewConvOpen(false);
+      console.log('✅ Group created:', result);
+
+      // Select the new conversation and close modal
+      if (result && typeof result === 'object' && 'id' in result) {
+        const newConvId = (result as { id: string }).id;
+        
+        console.log('🔄 Step 1: Invalidating conversations cache...');
+        
+        // ⚠️ CRITICAL: Force immediate refetch before selecting
+        await queryClient.invalidateQueries({ 
+          queryKey: ['conversations', currentUserId],
+          refetchType: 'active' 
+        });
+        
+        console.log('🔄 Step 2: Waiting for backend transaction...');
+        
+        // Wait a bit for backend consistency (Prisma transaction)
+        await new Promise(resolve => setTimeout(resolve, 200)); // Increased to 200ms
+        
+        console.log('🔄 Step 3: Refetching conversations...');
+        
+        // Force a manual refetch to be sure
+        await queryClient.refetchQueries({ 
+          queryKey: ['conversations', currentUserId],
+          exact: true 
+        });
+        
+        console.log('🔄 Step 4: Selecting new conversation...');
+        
+        // Check if conversation appears in list
+        const updatedConvs = queryClient.getQueryData(['conversations', currentUserId]) as Conversation[];
+        const newConvExists = updatedConvs?.some(c => c.id === newConvId);
+        
+        if (!newConvExists) {
+          console.error('❌ WARNING: New conversation not found in list!', {
+            newConvId,
+            totalConversations: updatedConvs?.length,
+            conversationIds: updatedConvs?.map(c => c.id)
+          });
+        } else {
+          console.log('✅ Conversation found in list!');
+        }
+        
+        // Now select the conversation
+        setSelectedConvId(newConvId);
+        setNewConvOpen(false);
+        setCreateGroupOpen(false);
+        
+        console.log('✅ Group should appear in sidebar now');
+      }
+    } catch (error) {
+      console.error('❌ Failed to create group:', error);
     }
   };
 
@@ -816,18 +998,30 @@ export function ChatPage() {
           <div className="flex items-center justify-between mb-3">
             <h1 className="text-2xl font-bold text-gray-900">Chats</h1>
             <div className="flex items-center gap-2">
-              {/* New Chat Button */}
+              {/* New Direct Chat Button */}
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => setNewConvOpen(true)}
                 className="h-9 w-9 rounded-full hover:bg-gray-100 transition-all hover:scale-110 active:scale-95"
-                title="New conversation"
+                title="New direct chat"
               >
-                <svg className="w-5 h-5 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.75v14.5m7.25-7.25H4.75" />
+                <svg className="w-5 h-5 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" />
                 </svg>
-                ➕
+              </Button>
+
+              {/* New Group Button */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setCreateGroupOpen(true)}
+                className="h-9 w-9 rounded-full hover:bg-gray-100 transition-all hover:scale-110 active:scale-95"
+                title="Create group"
+              >
+                <svg className="w-5 h-5 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
               </Button>
               
               {/* Connection Status */}
@@ -836,6 +1030,11 @@ export function ChatPage() {
                 isConnected ? 'bg-green-500' : 'bg-gray-400'
               )} />
             </div>
+          </div>
+          
+          {/* Workspace Selector */}
+          <div className="mb-3">
+            <WorkspaceSelector />
           </div>
           
           <div className="flex gap-2 mb-3">
@@ -861,18 +1060,22 @@ export function ChatPage() {
             </div>
           ) : (
             (conversations as Conversation[]).map((conv: Conversation) => (
-              <ConversationItem
-                key={conv.id}
-                id={conv.id}
-                title={conv.title || undefined}
-                type={conv.type}
-                members={conv.members}
-                lastMessage={conv.lastMessage || undefined}
-                isSelected={conv.id === selectedConvId}
-                onClick={() => setSelectedConvId(conv.id)}
-                users={users as User[]}
-                currentUserId={currentUserId}
-              />
+              <div key={conv.id} className="relative">
+                <ConversationItem
+                  id={conv.id}
+                  title={conv.title || undefined}
+                  type={conv.type}
+                  members={conv.members}
+                  lastMessage={conv.lastMessage || undefined}
+                  isSelected={conv.id === selectedConvId}
+                  onClick={() => setSelectedConvId(conv.id)}
+                  users={users as User[]}
+                  currentUserId={currentUserId}
+                />
+                <div className="absolute top-2 right-2">
+                  <UnreadBadge conversationId={conv.id} />
+                </div>
+              </div>
             ))
           )}
         </div>
@@ -888,7 +1091,27 @@ export function ChatPage() {
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col">
-        {selectedConv ? (
+        {!selectedConv ? (
+          <div className="flex items-center justify-center h-full md:block">
+            <div className="text-center md:hidden">
+              <button
+                onClick={() => setSidebarOpen(true)}
+                className="p-4 bg-blue-500 text-white rounded-full shadow-lg hover:bg-blue-600 transition-all mb-4"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
+              <p className="text-gray-500 text-sm">Tap to view conversations</p>
+            </div>
+            <div className="hidden md:flex items-center justify-center h-full">
+              <div className="text-center">
+                <div className="text-6xl mb-4">💬</div>
+                <p className="text-xl text-gray-600 font-medium">Select a conversation to start chatting</p>
+              </div>
+            </div>
+          </div>
+        ) : (
           <>
             {/* 💎 Chat Header - Messenger Style */}
             <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3 shadow-sm">
@@ -927,6 +1150,19 @@ export function ChatPage() {
               
               {/* Header Action Buttons */}
               <div className="flex items-center gap-2">
+                {/* Export Conversation Button */}
+                <button
+                  onClick={() => setExportImportOpen(true)}
+                  className="p-2 hover:bg-green-50 rounded-full transition-all"
+                  title="Export conversation"
+                  aria-label="Export conversation"
+                >
+                  <svg className="w-5 h-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                </button>
+                
+                {/* Pinned Messages Button */}
                 <button
                   onMouseEnter={() => {
                     if (selectedConvId) {
@@ -1012,24 +1248,13 @@ export function ChatPage() {
               <MessageInput
                 onSend={handleSendMessage}
                 onFileUpload={handleFileUpload}
+                onPasteImage={handlePasteImage}
                 disabled={sendMessageMutation.isPending}
                 onTypingStart={startTyping}
                 onTypingStop={stopTyping}
               />
             )}
           </>
-        ) : (
-          <div className="flex-1 flex items-center justify-center bg-gray-50">
-            <div className="text-center">
-              <div className="text-7xl mb-4">💬</div>
-              <h3 className="text-xl font-semibold text-gray-700 mb-2">
-                Select a conversation
-              </h3>
-              <p className="text-gray-500 text-sm">
-                Choose from your existing conversations
-              </p>
-            </div>
-          </div>
         )}
       </div>
 
@@ -1055,6 +1280,26 @@ export function ChatPage() {
         onOpenChange={setNewConvOpen}
         onCreateConversation={handleCreateConversation}
       />
+
+      {/* Create Group Modal */}
+      <CreateGroupModal
+        open={createGroupOpen}
+        onOpenChange={setCreateGroupOpen}
+      />
+
+      {/* Export Modal (Import removed) */}
+      {exportImportOpen && selectedConvId && (
+        <ExportModal
+          conversationId={selectedConvId}
+          open={exportImportOpen}
+          onOpenChange={setExportImportOpen}
+          onImportSuccess={() => {
+            // Invalidate messages and conversations to refresh the UI
+            queryClient.invalidateQueries({ queryKey: ['messages', selectedConvId] });
+            queryClient.invalidateQueries({ queryKey: ['conversations', currentUserId] });
+          }}
+        />
+      )}
 
       {/* Pinned Messages Panel */}
       {showPinnedPanel && selectedConvId && (

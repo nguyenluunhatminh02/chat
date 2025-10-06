@@ -9,6 +9,7 @@ import { OutboxForwarder } from './outbox.forwarder';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PushModule } from '../push/push.module';
 import { PresenceModule } from '../presence/presence.module';
+import { LinkPreviewModule } from '../link-preview/link-preview.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { PresenceModule } from '../presence/presence.module';
     NotificationsModule,
     PushModule,
     PresenceModule,
+    LinkPreviewModule,
   ],
   providers: [
     OutboxProducer,

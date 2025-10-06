@@ -49,13 +49,22 @@ export function ConversationItem({
 
   // Fetch unread count for this conversation
   const { data: unreadData } = useQuery({
-    queryKey: ['unread', currentUserId, id],
-    queryFn: () => api.getUnreadCount(currentUserId, id),
+    queryKey: ['unread', id],
+    queryFn: () => {
+      const userId = localStorage.getItem('x-user-id');
+      if (!userId) return Promise.resolve({ count: 0 });
+      return fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/reads/conversations/${id}/unread-count`, {
+        headers: {
+          'X-User-Id': userId,
+          'X-Workspace-Id': localStorage.getItem('x-workspace-id') || '',
+        },
+      }).then(res => res.json());
+    },
     enabled: !!currentUserId && !!id,
     refetchInterval: 30000, // Refetch every 30 seconds
   });
 
-  const unreadCount = unreadData?.unread || 0;
+  const unreadCount = unreadData?.count || 0;
 
   const getDisplayTitle = () => {
     if (title) return title;

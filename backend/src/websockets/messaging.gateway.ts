@@ -96,4 +96,8 @@ export class MessagingGateway
   emitToUsers(userIds: string[], event: string, payload: any) {
     userIds.forEach((uid) => this.server.to(`u:${uid}`).emit(event, payload));
   }
+
+  emitToUser(userId: string, event: string, payload: any) {
+    this.server.to(`u:${userId}`).emit(event, payload);
+  }
 }

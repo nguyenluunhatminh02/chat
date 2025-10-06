@@ -7,9 +7,13 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
+  UseInterceptors,
+  BadRequestException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { MessagesService } from './messages.service';
-import { SendMessageDto } from './dto/send-message.dto';
+import { MessageTypeDto, SendMessageDto } from './dto/send-message.dto';
 import { UserId } from '../../common/decorators/user-id.decorator';
 import { UpdateMessageDto } from './dto/update-message.dto';
 
@@ -69,5 +73,34 @@ export class MessagesController {
     const b = before ? Number(before) : 20;
     const a = after ? Number(after) : 20;
     return this.svc.around(userId, messageId, b, a);
+  }
+
+  // ====== NEW: Paste image upload (PHẦN 30) ======
+  @Post(':conversationId/paste-image')
+  @UseInterceptors(FileInterceptor('file'))
+  async pasteImage(
+    @UserId() userId: string,
+    @Param('conversationId') cid: string,
+    @UploadedFile() file: any,
+  ) {
+    // 1) validate nhẹ
+    if (!file) throw new BadRequestException('No file');
+    if (!file.mimetype.startsWith('image/'))
+      throw new BadRequestException('Only image allowed');
+    if (file.size > 10 * 1024 * 1024)
+      throw new BadRequestException('Image too large');
+
+    // 2) dùng FilesService lưu vào R2 → nhận fileObject
+    const f = await this.svc.savePasteImageToR2(
+      file as { mimetype: string; buffer: Buffer; size: number },
+    );
+
+    // 3) tạo message type=IMAGE + attachment
+    return this.svc.send(userId, {
+      conversationId: cid,
+      type: MessageTypeDto.IMAGE,
+      content: null,
+      attachments: [{ fileId: f.id }],
+    });
   }
 }

@@ -7,7 +7,6 @@ import { ConversationsModule } from './modules/conversations/conversations.modul
 import { MessagesModule } from './modules/messages/messages.module';
 import { MessagingGateway } from './websockets/messaging.gateway';
 import { PresenceModule } from './modules/presence/presence.module';
-import { ReceiptsModule } from './modules/receipts/receipts.module';
 import { ReactionsModule } from './modules/reactions/reactions.module';
 import { OutboxModule } from './modules/outbox/outbox.module';
 import { FilesModule } from './modules/files/files.module';
@@ -19,10 +18,18 @@ import { ModerationModule } from './modules/moderation/moderation.module';
 import { PushModule } from './modules/push/push.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PinsModule } from './modules/pins/pins.module';
+import { ReadsModule } from './modules/reads/reads.module';
+import { WorkspacesModule } from './modules/workspaces/workspaces.module';
+import { MentionsModule } from './modules/mentions/mentions.module';
+import { TransferModule } from './modules/transfer/transfer.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
+import { LinkPreviewModule } from './modules/link-preview/link-preview.module';
+import { CacheModule } from './common/cache/cache.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    CacheModule,
     BullModule.forRoot({
       prefix: process.env.BULL_PREFIX || 'app',
       connection: {
@@ -37,7 +44,6 @@ import { PinsModule } from './modules/pins/pins.module';
     ConversationsModule,
     MessagesModule,
     PresenceModule,
-    ReceiptsModule,
     ReactionsModule,
     OutboxModule,
     FilesModule,
@@ -48,6 +54,12 @@ import { PinsModule } from './modules/pins/pins.module';
     PushModule,
     NotificationsModule,
     PinsModule,
+    ReadsModule,
+    WorkspacesModule,
+    MentionsModule,
+    TransferModule,
+    AnalyticsModule,
+    LinkPreviewModule,
   ],
 })
 export class AppModule {}

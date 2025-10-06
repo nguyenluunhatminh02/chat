@@ -6,9 +6,18 @@ import { PresenceService } from '../presence/presence.service';
 import { OutboxProducer } from '../outbox/outbox.producer';
 import { BlocksModule } from '../blocks/blocks.module';
 import { ModerationModule } from '../moderation/moderation.module';
+import { MentionsModule } from '../mentions/mentions.module';
+import { LinkPreviewModule } from '../link-preview/link-preview.module';
+import { FilesModule } from '../files/files.module';
 
 @Module({
-  imports: [BlocksModule, ModerationModule],
+  imports: [
+    BlocksModule,
+    ModerationModule,
+    MentionsModule,
+    LinkPreviewModule,
+    FilesModule,
+  ],
   providers: [
     MessagesService,
     MessagingGateway,

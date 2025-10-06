@@ -11,6 +11,10 @@ import { UpdateMessageDto } from './dto/update-message.dto';
 import { OutboxProducer } from '../outbox/outbox.producer';
 import { BlocksService } from '../blocks/blocks.service';
 import { ModerationService } from '../moderation/moderation.service';
+import { MentionsService } from '../mentions/mentions.service';
+import { LinkPreviewService } from '../link-preview/link-preview.service';
+import { FilesService } from '../files/files.service';
+import { cleanUserText } from '../../common/safety/sanitize';
 
 @Injectable()
 export class MessagesService {
@@ -20,6 +24,9 @@ export class MessagesService {
     private outbox: OutboxProducer,
     private blocks: BlocksService,
     private moderation: ModerationService,
+    private mentions: MentionsService,
+    private linkPreview: LinkPreviewService,
+    private files: FilesService,
   ) {}
 
   async list(
@@ -83,6 +90,9 @@ export class MessagesService {
       }
     }
 
+    // Sanitize content if provided
+    const content = dto.content ? cleanUserText(dto.content) : null;
+
     // Tạo message + cập nhật updatedAt của conversation để nổi lên đầu
     const [msg] = await this.prisma.$transaction([
       this.prisma.message.create({
@@ -90,7 +100,7 @@ export class MessagesService {
           conversationId: dto.conversationId,
           senderId: userId,
           type: dto.type as any,
-          content: dto.content ?? null,
+          content,
           parentId: dto.parentId ?? null,
         },
       }),
@@ -134,6 +144,25 @@ export class MessagesService {
       conversationId: dto.conversationId,
       messageId: msg.id,
     });
+
+    // 4) 👤 NEW: Create mentions for this message
+    await this.mentions.createForMessage({
+      id: msg.id,
+      conversationId: dto.conversationId,
+      senderId: userId,
+      content: dto.content ?? '',
+    });
+
+    // 5) 🔗 NEW: Extract URLs and attach link previews
+    const urls = msg.content ? this.linkPreview.extractUrls(msg.content) : [];
+    if (urls.length) {
+      await this.linkPreview.attachToMessage(msg.id, urls);
+      await this.outbox.emit('preview.request', {
+        conversationId: msg.conversationId,
+        messageId: msg.id,
+        urls,
+      });
+    }
 
     return msg;
   }
@@ -286,5 +315,35 @@ export class MessagesService {
       anchorId: anchor.id,
       messages,
     };
+  }
+
+  // ====== NEW: Paste image upload (PHẦN 30) ======
+  async savePasteImageToR2(file: {
+    mimetype: string;
+    buffer: Buffer;
+    size: number;
+  }) {
+    const crypto = await import('crypto');
+    // tạo key theo ngày/uuid
+    const key = `uploads/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}`;
+
+    // Lưu buffer to R2
+    const put = await this.files.putObjectFromBuffer({
+      key,
+      mime: file.mimetype,
+      buffer: file.buffer,
+    });
+
+    // tạo DB fileObject READY
+    const fo = await this.prisma.fileObject.create({
+      data: {
+        bucket: put.bucket,
+        key: put.key,
+        mime: file.mimetype,
+        size: file.size,
+        status: 'READY',
+      },
+    });
+    return fo;
   }
 }

@@ -1,4 +1,4 @@
-import { memo, useState } from 'react';
+import { memo, useState, useEffect } from 'react';
 import { cn } from '../../utils/cn';
 import { formatTime } from '../../utils/helpers';
 import { tryParseFileContent } from '../../utils/file';
@@ -9,6 +9,9 @@ import { BlockUserModal } from './BlockUserModal';
 import { PinButton } from './PinButton';
 import { MessageActionsMenu } from './MessageActionsMenu';
 import { DevBoundary } from '../DevTools';
+import { renderMarkdown } from '../../utils/markdown';
+import { useLinkPreviews } from '../../hooks/useLinkPreviews';
+import { LinkPreviewCard } from './LinkPreviewCard';
 import type { Message, User } from '../../types';
 
 interface MessageItemProps {
@@ -84,9 +87,38 @@ function MessageItemInner({
   const [editText, setEditText] = useState('');
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [blockModalOpen, setBlockModalOpen] = useState(false);
+  const [linkPreviews, setLinkPreviews] = useState<any[]>([]);
   
   const fileContent = tryParseFileContent(message.content);
   const isDeleted = message.deletedAt;
+  
+  // Fetch link previews for text messages with URLs
+  const shouldFetchPreviews = message.type === 'TEXT' && message.content && /https?:\/\//.test(message.content);
+  const { data: fetchedPreviews } = useLinkPreviews(shouldFetchPreviews ? message.id : undefined, shouldFetchPreviews);
+  
+  // Listen for realtime preview.ready events
+  useEffect(() => {
+    const handlePreviewReady = (data: any) => {
+      if (data.messageId === message.id && data.previews) {
+        setLinkPreviews(data.previews);
+      }
+    };
+    
+    // Subscribe to socket event (you'll need to add this to your socket listeners)
+    if ((window as any).socket) {
+      (window as any).socket.on('preview.ready', handlePreviewReady);
+      return () => {
+        (window as any).socket.off('preview.ready', handlePreviewReady);
+      };
+    }
+  }, [message.id]);
+  
+  // Update link previews from fetched data
+  useEffect(() => {
+    if (fetchedPreviews && fetchedPreviews.length > 0) {
+      setLinkPreviews(fetchedPreviews);
+    }
+  }, [fetchedPreviews]);
   
   const handleStartEdit = () => {
     setIsEditing(true);
@@ -172,14 +204,41 @@ function MessageItemInner({
       }
     }
 
-    // Text message
+    // Text message with Markdown rendering
     if (message.type === 'TEXT' && message.content) {
-      return <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>;
+      const html = renderMarkdown(message.content);
+      return (
+        <>
+          <div
+            className="prose prose-sm prose-invert max-w-none leading-relaxed"
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+          {/* Link previews */}
+          {linkPreviews.length > 0 && (
+            <div className="space-y-2 mt-2">
+              {linkPreviews.slice(0, 3).map((preview, idx) => (
+                <LinkPreviewCard key={`${preview.url}-${idx}`} preview={preview} />
+              ))}
+              {linkPreviews.length > 3 && (
+                <div className="text-xs text-gray-400 italic">
+                  +{linkPreviews.length - 3} more link{linkPreviews.length - 3 > 1 ? 's' : ''}
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      );
     }
 
     // Fallback - show content anyway if exists
     if (message.content) {
-      return <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>;
+      const html = renderMarkdown(message.content);
+      return (
+        <div
+          className="prose prose-sm prose-invert max-w-none leading-relaxed"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      );
     }
 
     return <p className="text-gray-400 italic">Empty message</p>;

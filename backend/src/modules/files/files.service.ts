@@ -345,4 +345,22 @@ export class FilesService {
     await this.prisma.fileObject.delete({ where: { id: fileId } });
     return { ok: true, deleted: fileId };
   }
+
+  /** NEW: Upload buffer directly to R2 (for paste image) */
+  async putObjectFromBuffer(params: {
+    key: string;
+    mime: string;
+    buffer: Buffer;
+  }) {
+    await this.s3.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: params.key,
+        Body: params.buffer,
+        ContentType: params.mime,
+      }),
+    );
+
+    return { bucket: this.bucket, key: params.key };
+  }
 }
