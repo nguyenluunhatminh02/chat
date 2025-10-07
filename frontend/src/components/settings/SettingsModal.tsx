@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useTheme } from 'next-themes';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/Dialog';
 import { Button } from '../ui/Button';
 import { Bell, BellOff, Moon, Sun, Settings as SettingsIcon } from 'lucide-react';
@@ -17,27 +18,14 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [pushPermission, setPushPermission] = useState<NotificationPermission>('default');
-  const [darkMode, setDarkMode] = useState(false);
+  const { theme, setTheme } = useTheme();
 
   // Load settings from localStorage
   useEffect(() => {
     const savedNotifications = localStorage.getItem(`notifications-${currentUserId}`);
-    const savedDarkMode = localStorage.getItem(`darkMode-${currentUserId}`);
     
     if (savedNotifications !== null) {
       setNotificationsEnabled(savedNotifications === 'true');
-    }
-    
-    // Always apply dark mode on load, not just when modal opens
-    const isDark = savedDarkMode === 'true';
-    setDarkMode(isDark);
-    applyDarkMode(isDark);
-    
-    // Also ensure body has correct background
-    if (isDark) {
-      document.body.classList.add('dark');
-    } else {
-      document.body.classList.remove('dark');
     }
 
     // Check browser notification permission
@@ -45,16 +33,6 @@ export function SettingsModal({
       setPushPermission(Notification.permission);
     }
   }, [currentUserId]);
-
-  const applyDarkMode = (enabled: boolean) => {
-    if (enabled) {
-      document.documentElement.classList.add('dark');
-      document.body.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      document.body.classList.remove('dark');
-    }
-  };
 
   const handleToggleNotifications = async () => {
     if (!notificationsEnabled && 'Notification' in window) {
@@ -78,11 +56,9 @@ export function SettingsModal({
   };
 
   const handleToggleDarkMode = () => {
-    const newDarkMode = !darkMode;
-    setDarkMode(newDarkMode);
-    localStorage.setItem(`darkMode-${currentUserId}`, String(newDarkMode));
-    applyDarkMode(newDarkMode);
-    toast.success(newDarkMode ? 'Dark mode enabled' : 'Light mode enabled');
+    const newTheme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(newTheme);
+    toast.success(newTheme === 'dark' ? 'Dark mode enabled' : 'Light mode enabled');
   };
 
   return (
@@ -153,7 +129,7 @@ export function SettingsModal({
             
             <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
               <div className="flex items-center gap-3">
-                {darkMode ? (
+                {theme === 'dark' ? (
                   <Moon className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                 ) : (
                   <Sun className="w-5 h-5 text-amber-500" />
@@ -163,21 +139,21 @@ export function SettingsModal({
                     Dark Mode
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">
-                    {darkMode ? 'Dark theme enabled' : 'Light theme enabled'}
+                    {theme === 'dark' ? 'Dark theme enabled' : 'Light theme enabled'}
                   </div>
                 </div>
               </div>
               <button
                 onClick={handleToggleDarkMode}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  darkMode
+                  theme === 'dark'
                     ? 'bg-indigo-600'
                     : 'bg-gray-300 dark:bg-gray-600'
                 }`}
               >
                 <span
                   className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    darkMode ? 'translate-x-6' : 'translate-x-1'
+                    theme === 'dark' ? 'translate-x-6' : 'translate-x-1'
                   }`}
                 />
               </button>

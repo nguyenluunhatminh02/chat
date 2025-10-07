@@ -1,7 +1,7 @@
-import { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { QueryProvider } from './providers/QueryProvider';
 import { AppProvider } from './providers/AppProvider';
+import { ThemeProvider } from './components/ThemeProvider';
 import { ChatPage } from './pages/ChatPage';
 import { LoginPage } from './pages/LoginPage';
 import { DebugPage } from './pages/DebugPage';
@@ -12,28 +12,16 @@ import { ShadcnDemo } from './components/ShadcnDemo';
 import { DevTools } from './components/DevTools';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { Toaster } from 'react-hot-toast';
-import { useAppContext } from './hooks/useAppContext';
 
 
 function AppContent() {
   // Register push notifications for current user
   const push = usePushNotifications();
-  const { currentUserId } = useAppContext();
 
   // Log push status (optional - for debugging)
   if (push.error) {
     console.warn('Push notifications error:', push.error);
   }
-
-  // 🌙 Apply dark mode on app load (before SettingsModal is opened)
-  useEffect(() => {
-    const storageKey = `darkMode-${currentUserId || ''}`;
-    const savedDarkMode = localStorage.getItem(storageKey);
-    const isDark = savedDarkMode === 'true';
-
-    document.documentElement.classList.toggle('dark', isDark);
-    document.body.classList.toggle('dark', isDark);
-  }, [currentUserId]);
 
   return (
     <>
@@ -41,6 +29,11 @@ function AppContent() {
       <DevTools /> {/* 🔧 Dev Mode: Press "D" to toggle */}
       <Router>
           <div className="h-screen">
+            {/* <div className="p-4 text-black bg-white dark:bg-black dark:text-white">
+  If this flips, dark works.
+</div> */}
+
+
             <Routes>
               <Route path="/" element={<LoginPage />} />
               <Route path="/login" element={<LoginPage />} />
@@ -87,11 +80,13 @@ function AppContent() {
 
 function App() {
   return (
-    <QueryProvider>
-      <AppProvider>
-        <AppContent />
-      </AppProvider>
-    </QueryProvider>
+    <ThemeProvider defaultTheme="system" storageKey="app-theme">
+      <QueryProvider>
+        <AppProvider>
+          <AppContent />
+        </AppProvider>
+      </QueryProvider>
+    </ThemeProvider>
   );
 }
 
