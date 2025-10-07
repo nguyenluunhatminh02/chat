@@ -27,8 +27,8 @@ export function useTyping({
 }: UseTypingOptions): TypingState {
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [isUserTyping, setIsUserTyping] = useState(false);
-  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const heartbeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Listen to typing.update events
   useEffect(() => {

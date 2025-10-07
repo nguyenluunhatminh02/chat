@@ -9,22 +9,16 @@ import { AdminPanel } from './pages/AdminPanel';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { ShadcnDemo } from './components/ShadcnDemo';
-import { testAPI } from './utils/test-api';
 import { DevTools } from './components/DevTools';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { Toaster } from 'react-hot-toast';
+import { useAppContext } from './hooks/useAppContext';
 
-// Make testAPI available globally for debugging
-declare global {
-  interface Window {
-    testAPI: typeof testAPI;
-  }
-}
-window.testAPI = testAPI;
 
 function AppContent() {
   // Register push notifications for current user
   const push = usePushNotifications();
+  const { currentUserId } = useAppContext();
 
   // Log push status (optional - for debugging)
   if (push.error) {
@@ -33,20 +27,13 @@ function AppContent() {
 
   // 🌙 Apply dark mode on app load (before SettingsModal is opened)
   useEffect(() => {
-    const currentUserId = localStorage.getItem('x-user-id');
-    if (!currentUserId) return;
-
-    const savedDarkMode = localStorage.getItem(`darkMode-${currentUserId}`);
+    const storageKey = `darkMode-${currentUserId || ''}`;
+    const savedDarkMode = localStorage.getItem(storageKey);
     const isDark = savedDarkMode === 'true';
 
-    if (isDark) {
-      document.documentElement.classList.add('dark');
-      document.body.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      document.body.classList.remove('dark');
-    }
-  }, []);
+    document.documentElement.classList.toggle('dark', isDark);
+    document.body.classList.toggle('dark', isDark);
+  }, [currentUserId]);
 
   return (
     <>

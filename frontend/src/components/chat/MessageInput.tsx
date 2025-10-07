@@ -6,7 +6,7 @@ import { DevBoundary } from '../DevTools';
 import { MentionAutocomplete } from './MentionAutocomplete';
 
 interface MessageInputProps {
-  conversationId?: string;
+  conversationId?: string | null;
   onSend: (content: string, parentId?: string) => void;
   onFileUpload?: (file: File) => void;
   onPasteImage?: (file: File) => void;

@@ -21,10 +21,15 @@ export function useRemovePin() {
   });
 }
 
-export function usePins(conversationId: string, params?: { limit?: number; cursor?: string }) {
+export function usePins(conversationId?: string | null, params?: { limit?: number; cursor?: string }) {
   return useQuery({
     queryKey: ['pins', conversationId, params],
-    queryFn: () => pinsApi.listPins({ conversationId, ...params }),
+    queryFn: () => {
+      if (!conversationId) {
+        throw new Error('conversationId is required');
+      }
+      return pinsApi.listPins({ conversationId, ...params });
+    },
     enabled: !!conversationId,
     placeholderData: (prev) => prev,
     structuralSharing: true,

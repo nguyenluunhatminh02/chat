@@ -4,6 +4,7 @@ import type { User } from '../../types';
 import { DevBoundary } from '../DevTools';
 import { useQuery } from '@tanstack/react-query';
 import * as api from '../../lib/api';
+import type { PresenceResponse } from '../../lib/api';
 import { UnreadBadge } from './UnreadBadge';
 import { useUnreadCount } from '../../hooks/useReads';
 import { Users } from 'lucide-react';
@@ -43,10 +44,15 @@ export function ConversationItem({
     : null;
 
   // Fetch presence status for the other user in DIRECT chats
-  const { data: presenceData } = useQuery<{ userId: string; online: boolean; lastSeen: string | null }>({
+  const { data: presenceData } = useQuery<PresenceResponse>({
     queryKey: ['presence', otherUserId],
-    queryFn: () => otherUserId ? api.getPresence(otherUserId) : null,
-    enabled: type === 'DIRECT' && !!otherUserId,
+    queryFn: () => {
+      if (!otherUserId) {
+        throw new Error('otherUserId is required for presence lookup');
+      }
+      return api.getPresence(otherUserId);
+    },
+    enabled: type === 'DIRECT' && Boolean(otherUserId),
     refetchInterval: 10000, // Refetch every 10 seconds
   });
 
@@ -123,7 +129,7 @@ export function ConversationItem({
       onClick={onClick}
     >
       {/* Avatar - Messenger circular style */}
-      <div className="flex-shrink-0 relative">
+      <div className="relative flex-shrink-0">
         <div className={cn(
           'h-14 w-14 rounded-full bg-gradient-to-br flex items-center justify-center overflow-hidden',
           'text-white font-semibold text-base shadow-sm',
@@ -133,7 +139,7 @@ export function ConversationItem({
             <img 
               src={avatarUrl} 
               alt={getDisplayTitle()} 
-              className="w-full h-full object-cover"
+              className="object-cover w-full h-full"
             />
           ) : (
             getInitials()
@@ -160,7 +166,7 @@ export function ConversationItem({
               <Users className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 flex-shrink-0" />
             )}
           </div>
-          <div className="flex items-center gap-2 ml-2 flex-shrink-0">
+          <div className="flex items-center flex-shrink-0 gap-2 ml-2">
             {lastMessage && (
               <span className="text-[12px] text-gray-500 dark:text-gray-400">
                 {formatTime(lastMessage.createdAt)}

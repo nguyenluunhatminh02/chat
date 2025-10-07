@@ -767,7 +767,7 @@ export function ChatPage() {
 
   const handleSearch = async (query: string, scope: 'current' | 'all' = 'current') => {
     await searchHook.search(query, {
-      conversationId: scope === 'current' ? selectedConvId : undefined,
+      conversationId: scope === 'current' && selectedConvId ? selectedConvId : undefined,
     });
     // Keep search modal open to show results
   };

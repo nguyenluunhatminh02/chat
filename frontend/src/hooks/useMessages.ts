@@ -1,10 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as api from '../lib/api';
 
-export function useMessages(conversationId: string, cursor?: string) {
+export function useMessages(conversationId?: string | null, cursor?: string) {
   return useQuery({
     queryKey: ['messages', conversationId, cursor],
     queryFn: async () => {
+      if (!conversationId) {
+        throw new Error('conversationId is required');
+      }
       console.log('🔥 Fetching messages for conversation:', conversationId);
       try {
         const result = await api.listMessages(conversationId, cursor);

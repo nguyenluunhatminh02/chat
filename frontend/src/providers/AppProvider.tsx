@@ -1,23 +1,9 @@
-import React, { createContext, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { realtime } from '../lib/realtime';
 import { useLocalStorage } from '../utils/storage';
 import type { User, Conversation, Message } from '../types';
-
-interface AppContextType {
-  currentUserId: string;
-  setCurrentUserId: (id: string) => void;
-  selectedConvId: string;
-  setSelectedConvId: (id: string) => void;
-  users: User[];
-  setUsers: React.Dispatch<React.SetStateAction<User[]>>;
-  conversations: Conversation[];
-  setConversations: React.Dispatch<React.SetStateAction<Conversation[]>>;
-  messages: Message[];
-  setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
-  isConnected: boolean;
-}
-
-export const AppContext = createContext<AppContextType | undefined>(undefined);
+import { AppContext } from './AppContext';
+import type { AppContextType } from './AppContext';
 
 interface AppProviderProps {
   children: React.ReactNode;
@@ -25,7 +11,7 @@ interface AppProviderProps {
 
 export function AppProvider({ children }: AppProviderProps) {
   const [currentUserId, setCurrentUserId] = useLocalStorage<string>('x-user-id', '');
-  const [selectedConvId, setSelectedConvId] = useState<string>('');
+  const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);

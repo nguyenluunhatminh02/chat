@@ -141,9 +141,15 @@ export async function deleteMessage(userId: string, id: string) {
 }
 
 /* ========== Presence ========== */
-export async function getPresence(userId: string) {
+export interface PresenceResponse {
+  userId: string;
+  online: boolean;
+  lastSeen: string | null;
+}
+
+export async function getPresence(userId: string): Promise<PresenceResponse> {
   const res = await http(`/presence/${userId}`);
-  return json(res);
+  return json<PresenceResponse>(res);
 }
 
 /* ========== Threads (reply) ========== */

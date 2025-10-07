@@ -13,6 +13,23 @@ import { renderMarkdown } from '../../utils/markdown';
 import { useLinkPreviews } from '../../hooks/useLinkPreviews';
 import { LinkPreviewCard } from './LinkPreviewCard';
 import type { Message, User } from '../../types';
+import type { LinkPreview } from '../../lib/link-preview';
+
+interface PreviewReadyEvent {
+  messageId?: string;
+  previews?: LinkPreview[];
+}
+
+type SocketClient = {
+  on: (event: string, callback: (data: PreviewReadyEvent) => void) => void;
+  off: (event: string, callback: (data: PreviewReadyEvent) => void) => void;
+};
+
+declare global {
+  interface Window {
+    socket?: SocketClient;
+  }
+}
 
 interface MessageItemProps {
   message: Message;
@@ -87,29 +104,29 @@ function MessageItemInner({
   const [editText, setEditText] = useState('');
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [blockModalOpen, setBlockModalOpen] = useState(false);
-  const [linkPreviews, setLinkPreviews] = useState<any[]>([]);
+  const [linkPreviews, setLinkPreviews] = useState<LinkPreview[]>([]);
   
   const fileContent = tryParseFileContent(message.content);
   const isDeleted = message.deletedAt;
   
   // Fetch link previews for text messages with URLs
-  const shouldFetchPreviews = message.type === 'TEXT' && message.content && /https?:\/\//.test(message.content);
+  const shouldFetchPreviews = message.type === 'TEXT' && !!message.content && /https?:\/\//.test(message.content);
   const { data: fetchedPreviews } = useLinkPreviews(shouldFetchPreviews ? message.id : undefined, shouldFetchPreviews);
   
   // Listen for realtime preview.ready events
   useEffect(() => {
-    const handlePreviewReady = (data: any) => {
-      if (data.messageId === message.id && data.previews) {
-        setLinkPreviews(data.previews);
+      const handlePreviewReady = (data: PreviewReadyEvent) => {
+        if (data.messageId === message.id && Array.isArray(data.previews)) {
+          setLinkPreviews(data.previews);
       }
     };
     
     // Subscribe to socket event (you'll need to add this to your socket listeners)
-    if ((window as any).socket) {
-      (window as any).socket.on('preview.ready', handlePreviewReady);
-      return () => {
-        (window as any).socket.off('preview.ready', handlePreviewReady);
-      };
+      if (window.socket) {
+        window.socket.on('preview.ready', handlePreviewReady);
+        return () => {
+          window.socket?.off('preview.ready', handlePreviewReady);
+        };
     }
   }, [message.id]);
   

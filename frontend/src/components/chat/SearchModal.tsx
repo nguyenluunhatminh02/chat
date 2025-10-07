@@ -14,7 +14,7 @@ interface SearchModalProps {
   onClose: () => void;
   onSearch: (query: string, scope?: 'current' | 'all') => void;
   conversations: Conversation[];
-  selectedConvId?: string;
+  selectedConvId?: string | null;
   // Search results props
   searchLoading?: boolean;
   searchResults?: SearchHit[];
