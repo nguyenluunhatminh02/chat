@@ -79,6 +79,10 @@ model Conversation {
   message     Message[]
   pin         Pin[]
 
+    // 👇 NEW
+  avatarKey       String?
+  avatarUpdatedAt DateTime?
+
   @@index([type])
   @@index([workspaceId, updatedAt])
 }

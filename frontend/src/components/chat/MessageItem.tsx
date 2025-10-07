@@ -141,7 +141,7 @@ function MessageItemInner({
   const renderContent = () => {
     if (isDeleted) {
       return (
-        <div className="italic text-gray-400 text-sm">
+        <div className="text-sm italic text-gray-400">
           This message was deleted
         </div>
       );
@@ -157,19 +157,19 @@ function MessageItemInner({
               alt={fileContent.filename}
               loading="lazy"
               decoding="async"
-              className="max-h-72 max-w-full rounded-xl object-contain shadow-md group-hover:shadow-xl transition-shadow"
+              className="object-contain max-w-full transition-shadow shadow-md max-h-72 rounded-xl group-hover:shadow-xl"
             />
-            <div className="mt-2 text-xs opacity-80 font-medium">
+            <div className="mt-2 text-xs font-medium opacity-80">
               {fileContent.filename} {fileContent.size ? `· ${(fileContent.size / 1024).toFixed(1)} KB` : ''}
             </div>
           </a>
         );
       } else {
         return (
-          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 text-center border border-blue-100">
-            <div className="text-4xl mb-2 animate-pulse">🖼️</div>
+          <div className="p-4 text-center border border-blue-100 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl">
+            <div className="mb-2 text-4xl animate-pulse">🖼️</div>
             <p className="text-sm font-semibold text-gray-700">{fileContent.filename}</p>
-            <p className="text-xs text-blue-600 mt-1 font-medium">Uploading image...</p>
+            <p className="mt-1 text-xs font-medium text-blue-600">Uploading image...</p>
           </div>
         );
       }
@@ -180,12 +180,12 @@ function MessageItemInner({
       if (fileContent.url) {
         return (
           <a href={fileContent.url} target="_blank" rel="noreferrer" className="block group">
-            <div className="flex items-center space-x-3 bg-white/90 border-2 border-gray-200 rounded-xl p-3 hover:border-blue-400 hover:shadow-md transition-all">
-              <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-lg flex items-center justify-center text-xl shadow-sm">📎</div>
+            <div className="flex items-center p-3 space-x-3 transition-all border-2 border-gray-200 bg-white/90 rounded-xl hover:border-blue-400 hover:shadow-md">
+              <div className="flex items-center justify-center flex-shrink-0 w-10 h-10 text-xl rounded-lg shadow-sm bg-gradient-to-br from-blue-400 to-indigo-500">📎</div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold truncate text-gray-800 group-hover:text-blue-600">{fileContent.filename}</p>
+                <p className="text-sm font-semibold text-gray-800 truncate group-hover:text-blue-600">{fileContent.filename}</p>
                 {fileContent.size && (
-                  <p className="text-xs text-gray-500 font-medium">{(fileContent.size / 1024).toFixed(1)} KB</p>
+                  <p className="text-xs font-medium text-gray-500">{(fileContent.size / 1024).toFixed(1)} KB</p>
                 )}
               </div>
             </div>
@@ -193,11 +193,11 @@ function MessageItemInner({
         );
       } else {
         return (
-          <div className="flex items-center space-x-3 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 rounded-xl p-3">
-            <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-lg flex items-center justify-center text-xl shadow-sm animate-pulse">📎</div>
+          <div className="flex items-center p-3 space-x-3 border border-blue-100 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl">
+            <div className="flex items-center justify-center flex-shrink-0 w-10 h-10 text-xl rounded-lg shadow-sm bg-gradient-to-br from-blue-400 to-indigo-500 animate-pulse">📎</div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold truncate text-gray-700">{fileContent.filename}</p>
-              <p className="text-xs text-blue-600 font-medium">Uploading...</p>
+              <p className="text-sm font-semibold text-gray-700 truncate">{fileContent.filename}</p>
+              <p className="text-xs font-medium text-blue-600">Uploading...</p>
             </div>
           </div>
         );
@@ -210,17 +210,17 @@ function MessageItemInner({
       return (
         <>
           <div
-            className="prose prose-sm prose-invert max-w-none leading-relaxed"
+            className="leading-relaxed prose-sm prose prose-invert max-w-none"
             dangerouslySetInnerHTML={{ __html: html }}
           />
           {/* Link previews */}
           {linkPreviews.length > 0 && (
-            <div className="space-y-2 mt-2">
+            <div className="mt-2 space-y-2">
               {linkPreviews.slice(0, 3).map((preview, idx) => (
                 <LinkPreviewCard key={`${preview.url}-${idx}`} preview={preview} />
               ))}
               {linkPreviews.length > 3 && (
-                <div className="text-xs text-gray-400 italic">
+                <div className="text-xs italic text-gray-400">
                   +{linkPreviews.length - 3} more link{linkPreviews.length - 3 > 1 ? 's' : ''}
                 </div>
               )}
@@ -235,13 +235,13 @@ function MessageItemInner({
       const html = renderMarkdown(message.content);
       return (
         <div
-          className="prose prose-sm prose-invert max-w-none leading-relaxed"
+          className="leading-relaxed prose-sm prose prose-invert max-w-none"
           dangerouslySetInnerHTML={{ __html: html }}
         />
       );
     }
 
-    return <p className="text-gray-400 italic">Empty message</p>;
+    return <p className="italic text-gray-400">Empty message</p>;
   };
 
   return (
@@ -252,12 +252,12 @@ function MessageItemInner({
       <div 
         data-message-id={message.id}
         className={cn(
-          'flex w-full mb-3 transition-all duration-200',
+          'flex w-full mb-2 transition-all duration-200',
           isOwn ? 'justify-end' : 'justify-start'
         )}
       >
         <div className={cn(
-          'flex gap-2 max-w-[85%] sm:max-w-[75%] md:max-w-[70%] lg:max-w-[65%] group',
+          'flex gap-2 max-w-[80%] sm:max-w-[70%] md:max-w-[65%] group',
           isOwn ? 'flex-row-reverse' : 'flex-row'
         )}>
         {/* 🎨 Messenger Avatar - Circular */}
@@ -282,7 +282,7 @@ function MessageItemInner({
               onCopy={message.type === 'TEXT' && message.content ? () => {
                 navigator.clipboard.writeText(message.content || '');
               } : undefined}
-              className="text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity"
+              className="text-gray-600 transition-opacity opacity-0 group-hover:opacity-100"
             />
           )}
         </div>
@@ -332,11 +332,11 @@ function MessageItemInner({
             
             <div 
               className={cn(
-                'relative rounded-[18px] px-4 py-2.5 min-w-[80px] max-w-full transition-all duration-200 shadow-sm',
+                'relative rounded-2xl px-3 py-2 min-w-[60px] max-w-full transition-all duration-200',
                 isOwn 
-                  ? 'bg-[#0084ff] text-white' 
+                  ? 'bg-[#0084ff] text-white shadow-sm' 
                   : 'bg-[#e4e6eb] text-[#050505]',
-                isEditing && 'ring-2 ring-blue-400'
+                isEditing && 'ring-2 ring-blue-400 shadow-md'
               )}
               onMouseEnter={onEnsureReactions}
             >
@@ -351,7 +351,7 @@ function MessageItemInner({
                       if (e.key === 'Enter') handleSaveEdit();
                       if (e.key === 'Escape') handleCancelEdit();
                     }}
-                    className="w-full px-4 py-3 text-sm rounded-2xl border-2 border-indigo-300 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white/95 shadow-inner font-medium"
+                    className="w-full px-4 py-3 text-sm font-medium border-2 border-indigo-300 shadow-inner rounded-2xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white/95"
                   />
                   <div className="flex gap-2.5">
                     <button
@@ -400,7 +400,7 @@ function MessageItemInner({
           {!isDeleted && (
             <>
               {/* 🎨 Reactions & Reply Row - Always Visible */}
-              <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 mt-2">
                 {/* Reactions - Always visible when they exist */}
                 {Object.keys(reactions)
                   .sort()
@@ -424,7 +424,7 @@ function MessageItemInner({
                         aria-pressed={byMe}
                       >
                         <span className="text-lg leading-none">{emoji}</span>
-                        <span className="tabular-nums font-bold text-sm">{count}</span>
+                        <span className="text-sm font-bold tabular-nums">{count}</span>
                       </button>
                     );
                   })}
@@ -434,7 +434,7 @@ function MessageItemInner({
                   <ReactionPicker onPick={onReact}>
                     <button
                       type="button"
-                      className="inline-flex items-center justify-center w-8 h-8 rounded-full text-gray-500 bg-white hover:bg-gray-50 border-2 border-gray-200 hover:border-blue-400 transition-all shadow-sm hover:shadow-md hover:scale-110 active:scale-95"
+                      className="inline-flex items-center justify-center w-8 h-8 text-gray-500 transition-all bg-white border-2 border-gray-200 rounded-full shadow-sm hover:bg-gray-50 hover:border-blue-400 hover:shadow-md hover:scale-110 active:scale-95"
                       title="Add reaction"
                     >
                       <span className="text-base font-semibold">➕</span>

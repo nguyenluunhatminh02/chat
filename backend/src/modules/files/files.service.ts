@@ -137,7 +137,7 @@ export class FilesService {
       },
     });
 
-    const { url, fields } = await createPresignedPost(this.s3 as any, {
+    const { url, fields } = await createPresignedPost(this.s3, {
       Bucket: this.bucket,
       Key: key,
       Conditions: [

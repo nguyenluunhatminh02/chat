@@ -51,6 +51,9 @@ export class OutboxProcessor extends WorkerHost {
             .replace(/\s+/g, ' ')
             .trim()
             .substring(0, 100);
+          // Note: We send mention.created to ALL mentioned users (online + offline)
+          // because online users might have the conversation in background/unfocused.
+          // The frontend will handle showing notifications based on focus state.
           for (const it of ments) {
             this.gw.emitToUser(it.userId, 'mention.created', {
               conversationId,

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as api from '../lib/api';
+import { getStorageItem } from '../utils/storage';
 
 export function useConversations(userId: string) {
   return useQuery({
@@ -11,7 +12,7 @@ export function useConversations(userId: string) {
 
 export function useCreateConversation() {
   const queryClient = useQueryClient();
-  const currentUserId = localStorage.getItem('x-user-id') || '';
+  const currentUserId = getStorageItem<string>('x-user-id', '');
   
   return useMutation({
     mutationFn: (data: { type: 'DIRECT' | 'GROUP'; title?: string; members: string[] }) => 

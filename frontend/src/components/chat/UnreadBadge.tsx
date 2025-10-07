@@ -12,7 +12,7 @@ export function UnreadBadge({ conversationId, className = '' }: UnreadBadgeProps
 
   return (
     <div
-      className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 bg-red-500 text-white text-xs font-bold rounded-full ${className}`}
+      className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-white text-xs font-bold rounded-full ${className}`}
     >
       {unread.count > 99 ? '99+' : unread.count}
     </div>

@@ -25,6 +25,7 @@ export type Conversation = {
   id: string;
   type: ConversationType;
   title?: string | null;
+  avatarUrl?: string | null;
   createdById: string;
   createdAt: string;
   updatedAt: string;

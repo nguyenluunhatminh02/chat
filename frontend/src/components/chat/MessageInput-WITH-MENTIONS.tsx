@@ -213,10 +213,10 @@ export function MessageInput({
     if (!inputRef.current) return { top: 0, left: 0 };
     
     const rect = inputRef.current.getBoundingClientRect();
-    // Return position relative to parent container
+    // Position above the input
     return {
-      top: rect.top,
-      left: rect.left,
+      top: rect.top - 10, // 10px above input, will be positioned relative to viewport
+      left: rect.left + 10,
     };
   };
 
@@ -225,34 +225,32 @@ export function MessageInput({
               name="MessageInput" 
               filePath="src/components/chat/MessageInput.tsx"
             >
-    <div className="relative p-4 bg-white border-t border-gray-200 shadow-sm dark:bg-gray-800">
-      {/* Mention Autocomplete - Positioned absolutely within parent */}
+    <div className="border-t border-gray-200 bg-white dark:bg-gray-800 shadow-sm p-4 relative">
+      {/* Mention Autocomplete */}
       {mentionQuery !== null && conversationId && (
-        <div className="absolute mb-2 bottom-full left-4 right-4">
-          <MentionAutocomplete
-            conversationId={conversationId}
-            query={mentionQuery}
-            position={getMentionPosition()}
-            onSelect={handleMentionSelect}
-            onClose={() => {
-              setMentionQuery(null);
-              setMentionStart(-1);
-            }}
-          />
-        </div>
+        <MentionAutocomplete
+          conversationId={conversationId}
+          query={mentionQuery}
+          position={getMentionPosition()}
+          onSelect={handleMentionSelect}
+          onClose={() => {
+            setMentionQuery(null);
+            setMentionStart(-1);
+          }}
+        />
       )}
 
       {replyingTo && (
         <div className="mb-3 flex items-center justify-between rounded-lg bg-gray-100 dark:bg-gray-700 border-l-4 border-[#0084ff] p-3">
           <div className="flex-1">
             <p className="text-xs font-semibold text-gray-600 dark:text-gray-300">Replying to {replyingTo.userName}</p>
-            <p className="text-sm text-gray-900 truncate dark:text-gray-100">{replyingTo.content}</p>
+            <p className="text-sm text-gray-900 dark:text-gray-100 truncate">{replyingTo.content}</p>
           </div>
           <Button
             variant="ghost"
             size="sm"
             onClick={onCancelReply}
-            className="ml-3 text-gray-500 rounded-full h-7 w-7 hover:bg-gray-200 dark:hover:bg-gray-600 dark:text-gray-400"
+            className="ml-3 h-7 w-7 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500 dark:text-gray-400"
           >
             ✕
           </Button>
@@ -269,16 +267,16 @@ export function MessageInput({
         onDragLeave={handleDragLeave}
       >
         {isDragging && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center border-2 border-blue-400 border-dashed bg-blue-50 dark:bg-blue-900/50 bg-opacity-95 rounded-xl">
+          <div className="absolute inset-0 flex items-center justify-center bg-blue-50 dark:bg-blue-900/50 bg-opacity-95 rounded-xl z-10 border-2 border-dashed border-blue-400">
             <div className="text-center">
-              <div className="mb-2 text-5xl">📤</div>
-              <p className="font-semibold text-blue-600 dark:text-blue-400">Drop file to upload</p>
+              <div className="text-5xl mb-2">📤</div>
+              <p className="text-blue-600 dark:text-blue-400 font-semibold">Drop file to upload</p>
             </div>
           </div>
         )}
         
-        <form onSubmit={handleSubmit} className="flex items-end gap-2">
-          <div className="relative flex-1">
+        <form onSubmit={handleSubmit} className="flex gap-2 items-end">
+          <div className="flex-1 relative">
             <Input
               ref={inputRef}
               type="text"
@@ -304,7 +302,7 @@ export function MessageInput({
                   variant="ghost"
                   size="sm"
                   onClick={() => fileInputRef.current?.click()}
-                  className="absolute transition-all transform -translate-y-1/2 rounded-full right-2 top-1/2 h-9 w-9 hover:bg-gray-100 dark:hover:bg-gray-600 hover:scale-110 active:scale-95"
+                  className="absolute right-2 top-1/2 transform -translate-y-1/2 h-9 w-9 rounded-full hover:bg-gray-100 dark:hover:bg-gray-600 transition-all hover:scale-110 active:scale-95"
                   title="Attach file"
                 >
                   <svg className="w-6 h-6 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>

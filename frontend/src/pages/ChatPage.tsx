@@ -8,10 +8,11 @@ import { TypingIndicator } from '../components/chat/TypingIndicator';
 import { NewConversationModal } from '../components/chat/NewConversationModal';
 import { CreateGroupModal } from '../components/chat/CreateGroupModal';
 import { ExportModal } from '../components/chat/ExportModal';
+import { GroupSettingsModal } from '../components/chat/GroupSettingsModal';
 const PinnedMessagesPanel = lazy(() => import('../components/chat/PinnedMessagesPanel').then(m => ({ default: m.PinnedMessagesPanel })));
 import { BlockedBanner } from '../components/chat/BlockedBanner';
+import { SettingsModal } from '../components/settings/SettingsModal';
 import { WorkspaceSelector } from '../components/chat/WorkspaceSelector';
-import { UnreadBadge } from '../components/chat/UnreadBadge';
 import { ReadReceipts } from '../components/chat/ReadReceipts';
 import { NotificationBanner } from '../components/NotificationBanner';
 import { Button } from '../components/ui/Button';
@@ -89,7 +90,7 @@ function MessagesRenderer({
   const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
 
   return (
-    <div className="space-y-1 flex flex-col-reverse">
+    <div className="flex flex-col-reverse space-y-1">
       {messages.map((message: Message) => {
         const user = getUserById(message.senderId);
         const isPinned = pinnedMessageIds.has(message.id);
@@ -145,6 +146,8 @@ export function ChatPage() {
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
   const [exportImportOpen, setExportImportOpen] = useState(false);
   const [showPinnedPanel, setShowPinnedPanel] = useState(false);
+  const [groupSettingsOpen, setGroupSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   
   // Presence state
   const [peerPresence, setPeerPresence] = useState<{ online: boolean; lastSeen: string | null } | null>(null);
@@ -491,6 +494,69 @@ export function ChatPage() {
       }
     };
 
+    // Handle member removed event
+    const handleMemberRemoved = (data: { conversationId: string; removedUserId: string; removedBy: string; memberIds: string[] }) => {
+      console.log('🔥 Realtime: member.removed', data);
+      
+      // If you were removed from the conversation
+      if (data.removedUserId === currentUserId) {
+        console.log('❌ You were removed from conversation:', data.conversationId);
+        
+        // Clear selection if this was the selected conversation
+        if (selectedConvId === data.conversationId) {
+          setSelectedConvId(null);
+        }
+        
+        // Refresh conversations list (conversation will disappear)
+        queryClient.invalidateQueries({ queryKey: ['conversations', currentUserId] });
+        
+        // Show notification
+        import('react-hot-toast').then(({ toast }) => {
+          toast.error('You have been removed from the group');
+        });
+        return;
+      }
+
+      // If another member was removed, just refresh the conversation
+      console.log('✅ Member removed from conversation, refreshing data');
+      queryClient.invalidateQueries({ queryKey: ['conversation', data.conversationId] });
+      queryClient.invalidateQueries({ queryKey: ['conversations', currentUserId] });
+    };
+
+    // Handle conversation updated event (avatar, title changes)
+    const handleConversationUpdated = (data: { conversationId: string; avatarKey?: string; title?: string; memberIds: string[] }) => {
+      console.log('🔥 Realtime: conversation.updated', data);
+      
+      // Refresh conversation details
+      queryClient.invalidateQueries({ queryKey: ['conversation', data.conversationId] });
+      queryClient.invalidateQueries({ queryKey: ['conversations', currentUserId] });
+      
+      // If avatar was updated, show success message
+      if (data.avatarKey) {
+        console.log('✅ Avatar updated for conversation:', data.conversationId);
+      }
+      
+      if (data.title) {
+        console.log('✅ Title updated for conversation:', data.conversationId);
+      }
+    };
+
+    // Handle member added event
+    const handleMemberAdded = (data: { conversationId: string; addedUserId: string; addedBy: string; memberIds: string[] }) => {
+      console.log('🔥 Realtime: member.added', data);
+      
+      // Refresh conversation details and conversations list
+      queryClient.invalidateQueries({ queryKey: ['conversation', data.conversationId] });
+      queryClient.invalidateQueries({ queryKey: ['conversations', currentUserId] });
+      
+      console.log('✅ Member added to conversation:', {
+        conversationId: data.conversationId,
+        addedUserId: data.addedUserId,
+        addedBy: data.addedBy,
+        totalMembers: data.memberIds.length
+      });
+    };
+
     // Register event handlers
     realtime.on('message.created', handleMessageCreated);
     realtime.on('message.updated', handleMessageUpdated);
@@ -501,6 +567,9 @@ export function ChatPage() {
     realtime.on('pin.removed', handlePinRemoved);
     realtime.on('conversation.read', handleConversationRead);
     realtime.on('conversation.created', handleConversationCreated);
+    realtime.on('member.removed', handleMemberRemoved);
+    realtime.on('conversation.updated', handleConversationUpdated);
+    realtime.on('member.added', handleMemberAdded);
     
     return () => {
       realtime.off('message.created', handleMessageCreated);
@@ -512,8 +581,11 @@ export function ChatPage() {
       realtime.off('pin.removed', handlePinRemoved);
       realtime.off('conversation.read', handleConversationRead);
       realtime.off('conversation.created', handleConversationCreated);
+      realtime.off('member.removed', handleMemberRemoved);
+      realtime.off('conversation.updated', handleConversationUpdated);
+      realtime.off('member.added', handleMemberAdded);
     };
-  }, [currentUserId, selectedConvId, queryClient, openThreadId]);
+  }, [currentUserId, selectedConvId, queryClient, openThreadId, setSelectedConvId]);
 
   // Join conversation room when selected
   useEffect(() => {
@@ -545,8 +617,8 @@ export function ChatPage() {
     // Mark as read after a short delay (to avoid marking immediately)
     const timer = setTimeout(async () => {
       try {
-        const { markMessageRead } = await import('../lib/api');
-        await markMessageRead(currentUserId, selectedConvId, lastMessageFromOther.id);
+        const { markReadUpTo } = await import('../lib/reads');
+        await markReadUpTo(selectedConvId, { messageId: lastMessageFromOther.id });
         
         // Invalidate unread count
         queryClient.invalidateQueries({ queryKey: ['unread', selectedConvId] });
@@ -961,8 +1033,8 @@ export function ChatPage() {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
-          <h2 className="text-2xl font-bold mb-4">Welcome to Chat</h2>
-          <p className="text-gray-600 mb-4">Please set your user ID to start chatting</p>
+          <h2 className="mb-4 text-2xl font-bold">Welcome to Chat</h2>
+          <p className="mb-4 text-gray-600">Please set your user ID to start chatting</p>
           <Button onClick={() => {/* TODO: Open user selection modal */}}>
             Select User
           </Button>
@@ -972,41 +1044,64 @@ export function ChatPage() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-white">
+    <div className="flex flex-col h-screen bg-white dark:bg-gray-900">
       {/* Notification Banner */}
       <NotificationBanner />
+      
+      {/* User Info Bar */}
+      <div className="flex items-center justify-between px-4 py-2 text-white shadow-md bg-gradient-to-r from-indigo-600 to-purple-600 dark:from-indigo-700 dark:to-purple-700">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center w-8 h-8 text-sm font-semibold rounded-full bg-white/20">
+            {(users as User[]).find(u => u.id === currentUserId)?.name?.[0]?.toUpperCase() || currentUserId[0]?.toUpperCase()}
+          </div>
+          <div>
+            <div className="text-sm font-semibold">
+              {(users as User[]).find(u => u.id === currentUserId)?.name || 'You'}
+            </div>
+            <div className="text-xs text-white/80">
+              {(users as User[]).find(u => u.id === currentUserId)?.email || currentUserId}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className={cn(
+            'w-2 h-2 rounded-full',
+            isConnected ? 'bg-green-400' : 'bg-red-400'
+          )} />
+          <span className="text-xs">{isConnected ? 'Online' : 'Offline'}</span>
+        </div>
+      </div>
       
       <div className="flex flex-1 overflow-hidden">
         {/* 🎨 Sidebar - Messenger Style */}
         <div className={cn(
-          "md:flex md:w-80 lg:w-96 bg-white border-r border-gray-200 flex-col shadow-lg z-50",
+          "md:flex md:w-80 lg:w-96 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-col shadow-lg z-50",
           "fixed md:relative inset-y-0 left-0 transform transition-all duration-300 ease-out",
           sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
         )}>
-        <div className="p-4 border-b border-gray-200">
-          {/* Close button - Mobile only */}
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="md:hidden absolute top-4 right-4 p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-all"
-            aria-label="Close menu"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-          
+        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between mb-3">
-            <h1 className="text-2xl font-bold text-gray-900">Chats</h1>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Chats</h1>
             <div className="flex items-center gap-2">
+              {/* Close button - Mobile only */}
+              <button
+                onClick={() => setSidebarOpen(false)}
+                className="p-2 text-gray-600 dark:text-gray-300 transition-all rounded-full md:hidden hover:bg-gray-100 dark:hover:bg-gray-700"
+                aria-label="Close menu"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
               {/* New Direct Chat Button */}
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => setNewConvOpen(true)}
-                className="h-9 w-9 rounded-full hover:bg-gray-100 transition-all hover:scale-110 active:scale-95"
+                className="transition-all rounded-full h-9 w-9 hover:bg-gray-100 dark:hover:bg-gray-700 hover:scale-110 active:scale-95"
                 title="New direct chat"
               >
-                <svg className="w-5 h-5 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="w-5 h-5 text-gray-700 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" />
                 </svg>
               </Button>
@@ -1016,11 +1111,25 @@ export function ChatPage() {
                 variant="ghost"
                 size="icon"
                 onClick={() => setCreateGroupOpen(true)}
-                className="h-9 w-9 rounded-full hover:bg-gray-100 transition-all hover:scale-110 active:scale-95"
+                className="transition-all rounded-full h-9 w-9 hover:bg-gray-100 dark:hover:bg-gray-700 hover:scale-110 active:scale-95"
                 title="Create group"
               >
-                <svg className="w-5 h-5 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="w-5 h-5 text-gray-700 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+              </Button>
+
+              {/* Settings Button */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setSettingsOpen(true)}
+                className="transition-all rounded-full h-9 w-9 hover:bg-gray-100 dark:hover:bg-gray-700 hover:scale-110 active:scale-95"
+                title="Settings"
+              >
+                <svg className="w-5 h-5 text-gray-700 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
               </Button>
               
@@ -1042,7 +1151,7 @@ export function ChatPage() {
               variant="outline"
               size="sm"
               onClick={() => setSearchOpen(true)}
-              className="flex-1 justify-start text-gray-600 bg-gray-100 hover:bg-gray-200 border-0 rounded-full font-medium py-2"
+              className="justify-start flex-1 py-2 font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 border-0 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600"
             >
               <span className="mr-2">🔍</span>
               <span>Search...</span>
@@ -1054,8 +1163,8 @@ export function ChatPage() {
           {(conversations as Conversation[]).length === 0 ? (
             <div className="flex items-center justify-center h-full px-4">
               <div className="text-center">
-                <div className="text-5xl mb-3">💬</div>
-                <p className="text-gray-600 font-medium">No conversations yet</p>
+                <div className="mb-3 text-5xl">💬</div>
+                <p className="font-medium text-gray-600">No conversations yet</p>
               </div>
             </div>
           ) : (
@@ -1064,6 +1173,7 @@ export function ChatPage() {
                 <ConversationItem
                   id={conv.id}
                   title={conv.title || undefined}
+                  avatarUrl={conv.avatarUrl}
                   type={conv.type}
                   members={conv.members}
                   lastMessage={conv.lastMessage || undefined}
@@ -1072,9 +1182,6 @@ export function ChatPage() {
                   users={users as User[]}
                   currentUserId={currentUserId}
                 />
-                <div className="absolute top-2 right-2">
-                  <UnreadBadge conversationId={conv.id} />
-                </div>
               </div>
             ))
           )}
@@ -1084,76 +1191,99 @@ export function ChatPage() {
       {/* Mobile Overlay */}
       {sidebarOpen && (
         <div 
-          className="fixed inset-0 bg-black/30 z-40 md:hidden"
+          className="fixed inset-0 z-40 bg-black/30 md:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex flex-col flex-1">
         {!selectedConv ? (
           <div className="flex items-center justify-center h-full md:block">
             <div className="text-center md:hidden">
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="p-4 bg-blue-500 text-white rounded-full shadow-lg hover:bg-blue-600 transition-all mb-4"
+                className="p-4 mb-4 text-white transition-all bg-blue-500 rounded-full shadow-lg hover:bg-blue-600"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
               </button>
-              <p className="text-gray-500 text-sm">Tap to view conversations</p>
+              <p className="text-sm text-gray-500">Tap to view conversations</p>
             </div>
-            <div className="hidden md:flex items-center justify-center h-full">
+            <div className="items-center justify-center hidden h-full md:flex">
               <div className="text-center">
-                <div className="text-6xl mb-4">💬</div>
-                <p className="text-xl text-gray-600 font-medium">Select a conversation to start chatting</p>
+                <div className="mb-4 text-6xl">💬</div>
+                <p className="text-xl font-medium text-gray-600 dark:text-gray-300">Select a conversation to start chatting</p>
               </div>
             </div>
           </div>
         ) : (
           <>
             {/* 💎 Chat Header - Messenger Style */}
-            <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3 shadow-sm">
+            <div className="flex items-center gap-3 px-4 py-3 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm">
               {/* Hamburger Menu - Mobile Only */}
               <button
                 onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="md:hidden p-2 hover:bg-gray-100 rounded-full transition-all"
+                className="p-2 transition-all rounded-full md:hidden hover:bg-gray-100 dark:hover:bg-gray-700"
                 aria-label="Toggle menu"
               >
-                <svg className="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <svg className="w-6 h-6 text-gray-700 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
               </button>
               
               <div className="flex-1 min-w-0">
-                <h2 className="text-base font-semibold text-gray-900 truncate">
+                <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 truncate">
                   {selectedConv.title || 
                     (selectedConv.type === 'DIRECT' 
                       ? getUserById(selectedConv.members.find((m: ConversationMember) => m.userId !== currentUserId)?.userId || '')?.name || 'Direct Chat'
-                      : `Group Chat (${selectedConv.members.length})`
+                      : selectedConv.title || 'Group Chat'
                     )
                   }
                 </h2>
-                {selectedConv.type === 'DIRECT' && peerPresence && (
-                  <div className="text-xs mt-0.5">
-                    {peerPresence.online ? (
-                      <span className="text-green-600 font-medium">Active now</span>
-                    ) : (
-                      <span className="text-gray-500">
-                        Active {peerPresence.lastSeen ? new Date(peerPresence.lastSeen).toLocaleString() : 'recently'}
-                      </span>
-                    )}
+                {selectedConv.type === 'DIRECT' ? (
+                  peerPresence && (
+                    <div className="text-xs mt-0.5">
+                      {peerPresence.online ? (
+                        <span className="font-medium text-green-600">Active now</span>
+                      ) : (
+                        <span className="text-gray-500 dark:text-gray-400">
+                          Active {peerPresence.lastSeen ? new Date(peerPresence.lastSeen).toLocaleString() : 'recently'}
+                        </span>
+                      )}
+                    </div>
+                  )
+                ) : (
+                  <div className="text-xs mt-0.5 text-gray-600 dark:text-gray-400">
+                    {selectedConv.members.length} members: {selectedConv.members
+                      .map((m: ConversationMember) => getUserById(m.userId)?.name || m.userId)
+                      .join(', ')
+                      .substring(0, 50)}{selectedConv.members.length > 3 ? '...' : ''}
                   </div>
                 )}
               </div>
               
               {/* Header Action Buttons */}
               <div className="flex items-center gap-2">
+                {/* Group Settings Button - Only for GROUP chats */}
+                {selectedConv.type === 'GROUP' && (
+                  <button
+                    onClick={() => setGroupSettingsOpen(true)}
+                    className="p-2 transition-all rounded-full hover:bg-purple-50 dark:hover:bg-purple-900/30"
+                    title="Group settings"
+                    aria-label="Group settings"
+                  >
+                    <svg className="w-5 h-5 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                    </svg>
+                  </button>
+                )}
+                
                 {/* Export Conversation Button */}
                 <button
                   onClick={() => setExportImportOpen(true)}
-                  className="p-2 hover:bg-green-50 rounded-full transition-all"
+                  className="p-2 transition-all rounded-full hover:bg-green-50 dark:hover:bg-green-900/30"
                   title="Export conversation"
                   aria-label="Export conversation"
                 >
@@ -1173,7 +1303,7 @@ export function ChatPage() {
                     }
                   }}
                   onClick={() => setShowPinnedPanel(true)}
-                  className="p-2 hover:bg-blue-50 rounded-full transition-all"
+                  className="p-2 transition-all rounded-full hover:bg-blue-50 dark:hover:bg-blue-900/30"
                   title="View pinned messages"
                   aria-label="View pinned messages"
                 >
@@ -1185,25 +1315,25 @@ export function ChatPage() {
             </div>
 
             {/* 📱 Messages Area - Messenger Style */}
-            <div id="messages-container" className="flex-1 overflow-y-auto p-4 bg-white flex flex-col-reverse">
+            <div id="messages-container" className="flex flex-col-reverse flex-1 p-4 overflow-y-auto bg-white dark:bg-gray-900">
               {messagesLoading ? (
                 <div className="flex items-center justify-center flex-1">
                   <div className="text-center">
                     <div className="w-10 h-10 border-3 border-gray-300 border-t-[#0084ff] rounded-full animate-spin mx-auto mb-2" />
-                    <p className="text-gray-500 text-sm">Loading...</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Loading...</p>
                   </div>
                 </div>
               ) : messagesError ? (
                 <div className="flex items-center justify-center flex-1">
-                  <div className="text-center text-red-500">
+                  <div className="text-center text-red-500 dark:text-red-400">
                     <p>Error: {messagesError.message}</p>
                   </div>
                 </div>
               ) : messages.length === 0 ? (
                 <div className="flex items-center justify-center flex-1">
                   <div className="text-center">
-                    <div className="text-5xl mb-2">💬</div>
-                    <p className="text-gray-500">No messages yet</p>
+                    <div className="mb-2 text-5xl">💬</div>
+                    <p className="text-gray-500 dark:text-gray-400">No messages yet</p>
                   </div>
                 </div>
               ) : (
@@ -1246,6 +1376,7 @@ export function ChatPage() {
               />
             ) : (
               <MessageInput
+                conversationId={selectedConvId}
                 onSend={handleSendMessage}
                 onFileUpload={handleFileUpload}
                 onPasteImage={handlePasteImage}
@@ -1293,11 +1424,6 @@ export function ChatPage() {
           conversationId={selectedConvId}
           open={exportImportOpen}
           onOpenChange={setExportImportOpen}
-          onImportSuccess={() => {
-            // Invalidate messages and conversations to refresh the UI
-            queryClient.invalidateQueries({ queryKey: ['messages', selectedConvId] });
-            queryClient.invalidateQueries({ queryKey: ['conversations', currentUserId] });
-          }}
         />
       )}
 
@@ -1318,6 +1444,27 @@ export function ChatPage() {
         </Suspense>
       )}
 
+      {/* Group Settings Modal */}
+      {groupSettingsOpen && selectedConv && selectedConv.type === 'GROUP' && (
+        <GroupSettingsModal
+          open={groupSettingsOpen}
+          onOpenChange={setGroupSettingsOpen}
+          conversation={selectedConv}
+          getUserById={getUserById}
+          currentUserId={currentUserId}
+          onUpdateGroup={async () => {
+            // Invalidate conversations to refresh the UI
+            await queryClient.invalidateQueries({ queryKey: ['conversations', currentUserId] });
+          }}
+        />
+      )}
+
+      {/* Settings Modal */}
+      <SettingsModal
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        currentUserId={currentUserId}
+      />
 
       </div>
     </div>

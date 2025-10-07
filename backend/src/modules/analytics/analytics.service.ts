@@ -1,4 +1,4 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 
@@ -75,8 +75,8 @@ export class AnalyticsService {
       to,
     );
 
-    return rows.map((r) => ({
-      bucket: new Date(r.bucket).toISOString(),
+    return rows.map((r: any) => ({
+      bucket: new Date(r.bucket as string | number | Date).toISOString(),
       activeUsers: Number(r.active_users),
       messages: Number(r.messages),
     }));
@@ -151,17 +151,21 @@ ORDER BY 1`,
     );
 
     // Build matrix: offset = (week - cohort)/7days (integer)
-    const cohorts = sizes.map((s) => ({
-      cohortStartISO: new Date(s.cohort).toISOString(),
+    const cohorts = sizes.map((s: any) => ({
+      cohortStartISO: new Date(
+        s.cohort as string | number | Date,
+      ).toISOString(),
       size: Number(s.size),
     }));
 
-    const matrix = data.map((d) => {
-      const cohort = new Date(d.cohort).getTime();
-      const week = new Date(d.week).getTime();
+    const matrix = data.map((d: any) => {
+      const cohort = new Date(d.cohort as string | number | Date).getTime();
+      const week = new Date(d.week as string | number | Date).getTime();
       const offset = Math.round((week - cohort) / (7 * 86400000));
       return {
-        cohortStartISO: new Date(d.cohort).toISOString(),
+        cohortStartISO: new Date(
+          d.cohort as string | number | Date,
+        ).toISOString(),
         weekOffset: offset,
         active: Number(d.users),
       };
@@ -205,13 +209,15 @@ ORDER BY 1`,
       limit,
     );
 
-    return rows.map((r) => ({
+    return rows.map((r: any) => ({
       conversationId: r.id,
       title: r.title,
       type: r.type,
       messages: Number(r.messages),
       uniqueSenders: Number(r.unique_senders),
-      lastActivity: new Date(r.last_activity).toISOString(),
+      lastActivity: new Date(
+        r.last_activity as string | number | Date,
+      ).toISOString(),
     }));
   }
 }

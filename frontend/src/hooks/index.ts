@@ -2,6 +2,7 @@
 export { useUsers, useCreateUser } from './useUsers';
 export { useConversations, useCreateConversation } from './useConversations';
 export { useMessages, useSendMessage, useUpdateMessage, useDeleteMessage } from './useMessages';
+export { useWorkspaces, useCreateWorkspace, useAddWorkspaceMember, useWorkspaceMembers } from './useWorkspaces';
 
 // Context hooks
 export { useAppContext } from './useAppContext';

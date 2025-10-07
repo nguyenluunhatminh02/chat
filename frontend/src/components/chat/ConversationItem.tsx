@@ -4,10 +4,14 @@ import type { User } from '../../types';
 import { DevBoundary } from '../DevTools';
 import { useQuery } from '@tanstack/react-query';
 import * as api from '../../lib/api';
+import { UnreadBadge } from './UnreadBadge';
+import { useUnreadCount } from '../../hooks/useReads';
+import { Users } from 'lucide-react';
 
 interface ConversationItemProps {
   id: string;
   title?: string;
+  avatarUrl?: string | null;
   type: 'DIRECT' | 'GROUP';
   members: { userId: string }[];
   lastMessage?: {
@@ -24,6 +28,7 @@ interface ConversationItemProps {
 export function ConversationItem({
   id,
   title,
+  avatarUrl,
   type,
   members,
   lastMessage,
@@ -47,23 +52,8 @@ export function ConversationItem({
 
   const isOnline = presenceData?.online ?? false;
 
-  // Fetch unread count for this conversation
-  const { data: unreadData } = useQuery({
-    queryKey: ['unread', id],
-    queryFn: () => {
-      const userId = localStorage.getItem('x-user-id');
-      if (!userId) return Promise.resolve({ count: 0 });
-      return fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/reads/conversations/${id}/unread-count`, {
-        headers: {
-          'X-User-Id': userId,
-          'X-Workspace-Id': localStorage.getItem('x-workspace-id') || '',
-        },
-      }).then(res => res.json());
-    },
-    enabled: !!currentUserId && !!id,
-    refetchInterval: 30000, // Refetch every 30 seconds
-  });
-
+  // Use proper hook with includeSelf=false to exclude own messages
+  const { data: unreadData } = useUnreadCount(id, false);
   const unreadCount = unreadData?.count || 0;
 
   const getDisplayTitle = () => {
@@ -127,24 +117,32 @@ export function ConversationItem({
     <div
       className={cn(
         'group relative flex cursor-pointer items-center gap-3 px-3 py-2.5 transition-all duration-150',
-        'hover:bg-gray-100 active:bg-gray-200',
-        isSelected && 'bg-gray-100'
+        'hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-200 dark:active:bg-gray-600',
+        isSelected && 'bg-gray-100 dark:bg-gray-700'
       )}
       onClick={onClick}
     >
       {/* Avatar - Messenger circular style */}
       <div className="flex-shrink-0 relative">
         <div className={cn(
-          'h-14 w-14 rounded-full bg-gradient-to-br flex items-center justify-center',
+          'h-14 w-14 rounded-full bg-gradient-to-br flex items-center justify-center overflow-hidden',
           'text-white font-semibold text-base shadow-sm',
           getAvatarGradient()
         )}>
-          {getInitials()}
+          {avatarUrl && type === 'GROUP' ? (
+            <img 
+              src={avatarUrl} 
+              alt={getDisplayTitle()} 
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            getInitials()
+          )}
         </div>
         {/* Online/Offline indicator for DIRECT chats */}
         {type === 'DIRECT' && (
           <div className={cn(
-            "absolute bottom-0 right-0 w-4 h-4 border-2 border-white rounded-full",
+            "absolute bottom-0 right-0 w-4 h-4 border-2 border-white dark:border-gray-800 rounded-full",
             isOnline ? "bg-green-500" : "bg-red-500"
           )}></div>
         )}
@@ -153,31 +151,33 @@ export function ConversationItem({
       {/* Content - Messenger style */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-0.5">
-          <h3 className="text-[15px] font-semibold truncate text-gray-900">
-            {getDisplayTitle()}
-          </h3>
+          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            <h3 className="text-[15px] font-semibold truncate text-gray-900 dark:text-gray-100">
+              {getDisplayTitle()}
+            </h3>
+            {/* GROUP indicator */}
+            {type === 'GROUP' && (
+              <Users className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+            )}
+          </div>
           <div className="flex items-center gap-2 ml-2 flex-shrink-0">
             {lastMessage && (
-              <span className="text-[12px] text-gray-500">
+              <span className="text-[12px] text-gray-500 dark:text-gray-400">
                 {formatTime(lastMessage.createdAt)}
               </span>
             )}
-            {unreadCount > 0 && (
-              <div className="bg-[#0084ff] text-white text-[11px] font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center">
-                {unreadCount > 99 ? '99+' : unreadCount}
-              </div>
-            )}
+            <UnreadBadge conversationId={id} className="bg-[#0084ff]" />
           </div>
         </div>
         
         <p className={cn(
           "text-[13px] truncate",
-          unreadCount > 0 ? "text-gray-900 font-semibold" : "text-gray-600"
+          unreadCount > 0 ? "text-gray-900 dark:text-gray-100 font-semibold" : "text-gray-600 dark:text-gray-400"
         )}>
           {lastMessage ? (
             <span>{getLastMessagePreview()}</span>
           ) : (
-            <span className="text-gray-400">No messages yet</span>
+            <span className="text-gray-400 dark:text-gray-500">No messages yet</span>
           )}
         </p>
       </div>

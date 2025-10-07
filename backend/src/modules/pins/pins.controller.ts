@@ -6,7 +6,6 @@ import {
   Body,
   Param,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 import { PinsService } from './pins.service';
 import { UserId } from 'src/common/decorators/user-id.decorator';

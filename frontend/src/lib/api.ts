@@ -1,3 +1,5 @@
+import type { User } from '../types';
+
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 function http(path: string, init?: RequestInit) {
@@ -13,9 +15,9 @@ async function json<T = unknown>(res: Response): Promise<T> {
 }
 
 /* ========== Users ========== */
-export async function listUsers() {
+export async function listUsers(): Promise<User[]> {
   const res = await http('/users');
-  return json(res);
+  return json<User[]>(res);
 }
 export async function createUser(body: { email: string; name?: string }) {
   const res = await http('/users', {
@@ -50,6 +52,37 @@ export async function createConversation(
       'X-Workspace-Id': workspaceId,
     },
     body: JSON.stringify(body),
+  });
+  return json(res);
+}
+
+export async function removeMemberFromConversation(
+  userId: string,
+  conversationId: string,
+  memberId: string,
+  workspaceId: string
+) {
+  const res = await http(`/conversations/${conversationId}/members/${memberId}`, {
+    method: 'DELETE',
+    headers: { 'X-User-Id': userId ,'X-Workspace-Id': workspaceId,},
+  });
+  return json(res);
+}
+
+export async function addMemberToConversation(
+  userId: string,
+  conversationId: string,
+  newMemberId: string,
+  workspaceId: string
+) {
+  const res = await http(`/conversations/${conversationId}/members`, {
+    method: 'POST',
+    headers: { 
+      'Content-Type': 'application/json',
+      'X-User-Id': userId,
+      'X-Workspace-Id': workspaceId,
+    },
+    body: JSON.stringify({ userId: newMemberId }),
   });
   return json(res);
 }

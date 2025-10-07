@@ -100,32 +100,27 @@ export class LinkPreviewService {
         const titleTag = $('title').first().text()?.trim();
 
         const siteName = firstDefined(
-          og('site_name') as string | undefined,
-          $('meta[name="application-name"]').attr('content') as
-            | string
-            | undefined,
+          og('site_name'),
+          $('meta[name="application-name"]').attr('content'),
         );
         const title = firstDefined(
-          og('title') as string | undefined,
-          tw('title') as string | undefined,
+          og('title'),
+          tw('title'),
           titleTag as string | undefined,
         );
         const description = firstDefined(
-          og('description') as string | undefined,
-          tw('description') as string | undefined,
-          $('meta[name="description"]').attr('content') as string | undefined,
+          og('description'),
+          tw('description'),
+          $('meta[name="description"]').attr('content'),
         );
-        let imageUrl = firstDefined(
-          og('image') as string | undefined,
-          tw('image') as string | undefined,
-        );
+        let imageUrl = firstDefined(og('image'), tw('image'));
         if (imageUrl && imageUrl.startsWith('/'))
           imageUrl = new URL(imageUrl, url).toString();
 
         // icon
         let iconUrl =
-          ($('link[rel="icon"]').attr('href') as string | undefined) ||
-          ($('link[rel="shortcut icon"]').attr('href') as string | undefined) ||
+          $('link[rel="icon"]').attr('href') ||
+          $('link[rel="shortcut icon"]').attr('href') ||
           '';
         if (iconUrl) iconUrl = new URL(iconUrl, url).toString();
 
@@ -198,7 +193,7 @@ export class LinkPreviewService {
     });
     const out: any[] = [];
     for (const l of links) {
-      const url = l.url as string;
+      const url = l.url;
       out.push(await this.fetch(url));
     }
     return out;

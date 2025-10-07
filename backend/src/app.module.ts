@@ -5,7 +5,6 @@ import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './modules/users/users.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { MessagesModule } from './modules/messages/messages.module';
-import { MessagingGateway } from './websockets/messaging.gateway';
 import { PresenceModule } from './modules/presence/presence.module';
 import { ReactionsModule } from './modules/reactions/reactions.module';
 import { OutboxModule } from './modules/outbox/outbox.module';

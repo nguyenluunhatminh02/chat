@@ -1,4 +1,4 @@
-
+import { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { QueryProvider } from './providers/QueryProvider';
 import { AppProvider } from './providers/AppProvider';
@@ -30,6 +30,23 @@ function AppContent() {
   if (push.error) {
     console.warn('Push notifications error:', push.error);
   }
+
+  // 🌙 Apply dark mode on app load (before SettingsModal is opened)
+  useEffect(() => {
+    const currentUserId = localStorage.getItem('x-user-id');
+    if (!currentUserId) return;
+
+    const savedDarkMode = localStorage.getItem(`darkMode-${currentUserId}`);
+    const isDark = savedDarkMode === 'true';
+
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+      document.body.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.body.classList.remove('dark');
+    }
+  }, []);
 
   return (
     <>

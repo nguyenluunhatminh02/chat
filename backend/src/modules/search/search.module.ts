@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { SearchService } from './search.service';
 import { SearchController } from './search.controller';
-import { SearchIndexProcessor } from './search-index.processor';
 import { BullModule } from '@nestjs/bullmq';
 import { OutboxProcessor } from '../outbox/outbox.processor';
 import { NotificationsService } from '../notifications/notifications.service';

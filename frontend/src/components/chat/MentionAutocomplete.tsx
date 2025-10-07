@@ -5,7 +5,7 @@ import { User } from 'lucide-react';
 interface Props {
   conversationId: string;
   query: string; // text after @
-  position: { top: number; left: number }; // cursor position
+  position?: { top: number; left: number }; // cursor position (not used, kept for compatibility)
   onSelect: (userId: string, name: string) => void;
   onClose: () => void;
 }
@@ -13,7 +13,6 @@ interface Props {
 export function MentionAutocomplete({
   conversationId,
   query,
-  position,
   onSelect,
   onClose,
 }: Props) {
@@ -69,10 +68,9 @@ export function MentionAutocomplete({
     return (
       <div
         ref={ref}
-        className="absolute z-50 bg-white rounded-lg shadow-lg border p-2"
-        style={{ top: position.top, left: position.left }}
+        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 p-3"
       >
-        <div className="text-sm text-gray-500">Loading...</div>
+        <div className="text-sm text-gray-500 dark:text-gray-400">Loading...</div>
       </div>
     );
   }
@@ -84,14 +82,14 @@ export function MentionAutocomplete({
   return (
     <div
       ref={ref}
-      className="absolute z-50 bg-white rounded-lg shadow-lg border max-h-64 overflow-y-auto"
-      style={{ top: position.top, left: position.left, minWidth: '250px' }}
+      className="bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 max-h-64 overflow-y-auto"
+      style={{ minWidth: '250px' }}
     >
       {users.map((user, i) => (
         <button
           key={user.id}
-          className={`w-full flex items-center gap-3 px-4 py-2 hover:bg-blue-50 transition-colors ${
-            i === selectedIndex ? 'bg-blue-50' : ''
+          className={`w-full flex items-center gap-3 px-4 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors ${
+            i === selectedIndex ? 'bg-blue-50 dark:bg-blue-900/30' : ''
           }`}
           onClick={() => onSelect(user.id, user.name || user.email)}
         >
@@ -107,11 +105,11 @@ export function MentionAutocomplete({
             </div>
           )}
           <div className="flex-1 text-left">
-            <div className="text-sm font-medium text-gray-900">
+            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
               {user.name || user.email}
             </div>
             {user.name && (
-              <div className="text-xs text-gray-500">{user.email}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{user.email}</div>
             )}
           </div>
         </button>
