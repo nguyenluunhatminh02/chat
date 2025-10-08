@@ -14,11 +14,27 @@ import {
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
-// ✅ FIX interop: dùng CommonJS import assignment
+// ✅ interop: CommonJS import assignment cho sharp
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import sharp = require('sharp');
 import { fileTypeFromBuffer } from 'file-type';
+import { extname } from 'path';
 import { PrismaService } from 'src/prisma/prisma.service';
+
+// ==== MIME WHITELIST ====
+// Gộp audio + fallback `video/webm` (do MediaRecorder) vào ALLOWED_MIMES
+const AUDIO_MIMES = [
+  'audio/mpeg', // mp3
+  'audio/mp4', // mp4/m4a (Safari)
+  'audio/ogg', // ogg/opus
+  'audio/wav',
+  'audio/webm', // webm/opus
+  'audio/aac',
+  'audio/x-m4a',
+  'audio/3gpp',
+  'audio/opus',
+  'video/webm', // fallback khi MediaRecorder gắn video/*
+];
 
 const ALLOWED_MIMES = [
   'image/jpeg',
@@ -27,6 +43,7 @@ const ALLOWED_MIMES = [
   'image/gif',
   'application/pdf',
   'video/mp4',
+  ...AUDIO_MIMES,
 ];
 
 // robust: hỗ trợ Node Readable, WebStream, Blob
@@ -113,7 +130,7 @@ export class FilesService {
     };
   }
 
-  /** (Giữ cho S3/MinIO). Nếu là R2 → báo lỗi rõ ràng. */
+  /** Presigned POST (S3/MinIO). Nếu là R2 → ném lỗi hướng dẫn dùng PUT. */
   async presign(filename: string, mime: string, sizeMax = 25 * 1024 * 1024) {
     if (this.isR2()) {
       throw new BadRequestException(
@@ -175,7 +192,7 @@ export class FilesService {
       new GetObjectCommand({
         Bucket: f.bucket,
         Key: f.key,
-        Range: 'bytes=0-131071',
+        Range: 'bytes=0-131071', // 128KB
       }),
     );
     const buf = await streamToBuffer(part.Body as any);
@@ -246,18 +263,11 @@ export class FilesService {
       throw new BadRequestException('Object rỗng hoặc tải thất bại (size=0)');
     }
 
+    // Kiểm PNG signature (tránh 1 số PNG lỗi)
     if (f.mime === 'image/png') {
       const sig = buf.subarray(0, 8).toString('hex');
       const PNG_SIG = '89504e470d0a1a0a';
       if (sig !== PNG_SIG) {
-        console.error(
-          '[thumbnail] PNG signature mismatch:',
-          sig,
-          'expected',
-          PNG_SIG,
-          'key=',
-          f.key,
-        );
         throw new BadRequestException('PNG hỏng/không hợp lệ (signature sai)');
       }
     }
@@ -266,7 +276,6 @@ export class FilesService {
     let resized: Buffer;
 
     try {
-      // failOnError=false để bớt nhạy với một số PNG lỗi
       const base = sharp(buf, { failOnError: false }).rotate();
       meta = await base.metadata();
       resized = await base
@@ -279,14 +288,6 @@ export class FilesService {
         .jpeg({ quality: 80 })
         .toBuffer();
     } catch (e: any) {
-      console.error(
-        '[thumbnail] sharp decode error:',
-        e?.message || e,
-        'key=',
-        f.key,
-        'len=',
-        buf.length,
-      );
       throw new BadRequestException(
         'Không đọc được ảnh nguồn; file có thể bị hỏng hoặc định dạng không hợp lệ',
       );
@@ -332,7 +333,6 @@ export class FilesService {
       );
     }
 
-    // Xoá object chính + thumbnail nếu có
     await this.s3
       .send(new DeleteObjectCommand({ Bucket: f.bucket, Key: f.key }))
       .catch(() => undefined);
@@ -346,7 +346,7 @@ export class FilesService {
     return { ok: true, deleted: fileId };
   }
 
-  /** NEW: Upload buffer directly to R2 (for paste image) */
+  /** Upload buffer trực tiếp lên R2/S3 */
   async putObjectFromBuffer(params: {
     key: string;
     mime: string;
@@ -360,7 +360,65 @@ export class FilesService {
         ContentType: params.mime,
       }),
     );
-
     return { bucket: this.bucket, key: params.key };
+  }
+
+  /** Helper: upload buffer + tạo FileObject READY */
+  async createFileFromBuffer(params: {
+    buffer: Buffer;
+    mime: string;
+    size?: number;
+    filename?: string;
+    keyPrefix?: string;
+    allowedMimes?: string[];
+  }) {
+    const {
+      buffer,
+      mime,
+      size,
+      filename,
+      keyPrefix = 'uploads',
+      allowedMimes,
+    } = params;
+
+    if (allowedMimes && !allowedMimes.includes(mime)) {
+      throw new BadRequestException(
+        `Mime không được phép: ${mime}. Allowed: ${allowedMimes.join(', ')}`,
+      );
+    }
+    // Nếu không truyền allowedMimes riêng: vẫn enforce ALLOWED_MIMES chung
+    if (!allowedMimes && !ALLOWED_MIMES.includes(mime)) {
+      throw new BadRequestException(`Mime không được phép: ${mime}`);
+    }
+
+    const fileId = randomUUID();
+    const safeExt = filename ? extname(filename) : '';
+    const key = `${keyPrefix}/${new Date().toISOString().slice(0, 10)}/${fileId}${safeExt}`;
+
+    await this.putObjectFromBuffer({ key, mime, buffer });
+
+    return this.prisma.fileObject.create({
+      data: {
+        id: fileId,
+        bucket: this.bucket,
+        key,
+        mime,
+        size: size ?? buffer.length,
+        status: 'READY' as any,
+      },
+    });
+  }
+
+  getPublicUrl(key?: string | null): string | undefined {
+    if (!key) return undefined;
+    const base = process.env.FILES_CDN_BASE_URL?.replace(/\/+$/, '');
+    return base ? `${base}/${key.replace(/^\/+/, '')}` : undefined;
+  }
+
+  // tuỳ bạn, có thể có helper "serialize" để gắn url vào file object
+  attachPublicUrl<T extends { key?: string | null }>(
+    file: T,
+  ): T & { url?: string } {
+    return { ...file, url: this.getPublicUrl(file.key || undefined) };
   }
 }

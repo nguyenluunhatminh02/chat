@@ -4,6 +4,7 @@ export enum MessageTypeDto {
   TEXT = 'TEXT',
   IMAGE = 'IMAGE',
   FILE = 'FILE',
+  VOICE_MESSAGE = 'VOICE_MESSAGE',
 }
 
 export class SendMessageDto {
@@ -12,4 +13,5 @@ export class SendMessageDto {
   @IsOptional() @IsString() content?: string | null;
   @IsOptional() @IsString() parentId?: string; // reply
   @IsOptional() attachments?: { fileId: string }[];
+  @IsOptional() metadata?: Record<string, any>;
 }

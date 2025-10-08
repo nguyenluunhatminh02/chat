@@ -42,6 +42,13 @@ export class MessagesService {
       orderBy: { createdAt: 'desc' },
       take: limit,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      include: {
+        attachment: {
+          include: {
+            file: true,
+          },
+        },
+      },
     });
   }
 
@@ -102,6 +109,7 @@ export class MessagesService {
           type: dto.type as any,
           content,
           parentId: dto.parentId ?? null,
+          metadata: dto.metadata ?? undefined,
         },
       }),
       this.prisma.conversation.update({
@@ -162,6 +170,23 @@ export class MessagesService {
         messageId: msg.id,
         urls,
       });
+    }
+
+    // 6) 📎 NEW: Create Attachment records if provided
+    if (dto.attachments && dto.attachments.length > 0) {
+      await Promise.all(
+        dto.attachments.map((att) =>
+          this.prisma.attachment.create({
+            data: {
+              messageId: msg.id,
+              fileId: att.fileId,
+            },
+          }),
+        ),
+      );
+      console.log(
+        `✅ Created ${dto.attachments.length} attachments for message ${msg.id}`,
+      );
     }
 
     return msg;
@@ -323,27 +348,12 @@ export class MessagesService {
     buffer: Buffer;
     size: number;
   }) {
-    const crypto = await import('crypto');
-    // tạo key theo ngày/uuid
-    const key = `uploads/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}`;
-
-    // Lưu buffer to R2
-    const put = await this.files.putObjectFromBuffer({
-      key,
-      mime: file.mimetype,
+    return this.files.createFileFromBuffer({
       buffer: file.buffer,
+      mime: file.mimetype,
+      size: file.size,
+      filename: `paste-${Date.now()}`,
+      keyPrefix: 'uploads',
     });
-
-    // tạo DB fileObject READY
-    const fo = await this.prisma.fileObject.create({
-      data: {
-        bucket: put.bucket,
-        key: put.key,
-        mime: file.mimetype,
-        size: file.size,
-        status: 'READY',
-      },
-    });
-    return fo;
   }
 }

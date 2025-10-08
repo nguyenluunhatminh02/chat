@@ -25,6 +25,8 @@ model User {
   workspaceMemberships WorkspaceMember[]
 
   ConversationMember ConversationMember[]
+
+  MessageDraft MessageDraft[]
 }
 
 enum ConversationType { 
@@ -85,6 +87,7 @@ model Conversation {
 
   @@index([type])
   @@index([workspaceId, updatedAt])
+  MessageDraft MessageDraft[]
 }
 
 model ConversationMember {
@@ -106,7 +109,8 @@ enum MessageType {
   TEXT 
   IMAGE 
   FILE 
-  SYSTEM 
+  SYSTEM
+  VOICE_MESSAGE
 }
 
 
@@ -397,4 +401,88 @@ model MessageLink {
 
   @@id([messageId, url])
   @@index([url])
+}
+
+// ============ NEW FEATURES ============
+
+// 1. Message Translation
+model MessageTranslation {
+  id              String   @id @default(cuid())
+  messageId       String
+  targetLanguage  String   // e.g., "vi", "en", "ja"
+  translatedText  String   @db.Text
+  createdAt       DateTime @default(now())
+
+  @@unique([messageId, targetLanguage])
+  @@index([messageId])
+}
+
+// 2. Voice Messages (metadata stored in Message.metadata)
+// No separate model needed - use MessageType.VOICE_MESSAGE
+
+// 3. Message Scheduling
+enum ScheduledMessageStatus {
+  PENDING
+  SENT
+  CANCELLED
+  FAILED
+  PROCESSING
+}
+
+model ScheduledMessage {
+  id             String                 @id @default(cuid())
+  conversationId String
+  senderId       String
+  content        String                 @db.Text
+  metadata       Json?
+  scheduledFor   DateTime
+  status         ScheduledMessageStatus @default(PENDING)
+  sentMessageId  String?                // ID of actual message after sent
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  processingAt   DateTime?              // thời điểm job được "claim"
+  failReason     String?                 // optional: lưu error
+
+  @@index([conversationId, scheduledFor])
+  @@index([senderId])
+  @@index([status, scheduledFor])
+}
+
+// 4. Message Forwarding (metadata stored in Message.metadata)
+// forwardedFrom: { messageId, conversationId, senderId }
+
+// 5. User Status/Presence
+enum UserStatus {
+  ONLINE
+  OFFLINE
+  AWAY
+  BUSY
+  DO_NOT_DISTURB
+}
+
+model UserPresence {
+  userId        String     @id
+  status        UserStatus @default(OFFLINE)
+  customStatus  String?    // Custom status message
+  lastSeenAt    DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  @@index([status])
+}
+
+// 6. Message Drafts
+model MessageDraft {
+  conversationId String
+  userId         String
+  content        String   @db.Text
+  metadata       Json?    // For mentions, attachments, etc.
+  updatedAt      DateTime @updatedAt
+  createdAt     DateTime @default(now())
+
+  conversation  Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+
+  @@id([conversationId, userId])
+  @@index([userId])
 }

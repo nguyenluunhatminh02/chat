@@ -275,7 +275,7 @@ export function ChatPage() {
     };
   }, [selectedConv, users, currentUserId, getDirectPeer]);
   
-  // Auto-mark-read effect (debounced 500ms after viewing conversation)
+  // Auto-mark-read effect (debounced 1s after viewing conversation)
   useEffect(() => {
     if (!selectedConvId || !messagesData || messagesLoading) return;
     
@@ -286,15 +286,21 @@ export function ChatPage() {
     const lastMessage = messages[messages.length - 1];
     if (!lastMessage || lastMessage.senderId === currentUserId) return;
     
+    // Only mark as read if there's actually unread messages
+    const hasUnread = messages.some(m => !m.readBy?.some(r => r.userId === currentUserId));
+    if (!hasUnread) return;
+    
     const timer = setTimeout(() => {
       markReadMutation.mutate({
         conversationId: selectedConvId,
         opts: { messageId: lastMessage.id },
       });
-    }, 500); // Debounce 500ms
+    }, 1000);
     
     return () => clearTimeout(timer);
-  }, [selectedConvId, messagesData, messagesLoading, currentUserId, markReadMutation]);
+    // ✅ Removed markReadMutation from deps to avoid infinite loop
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedConvId, messagesData, messagesLoading, currentUserId]);
   
   // Wire realtime events for automatic updates
   useEffect(() => {
@@ -604,32 +610,8 @@ export function ChatPage() {
 
   const messages = useMemo(() => (messagesData || []) as Message[], [messagesData]);
 
-  // Mark messages as read when viewing conversation
-  useEffect(() => {
-    if (!selectedConvId || !currentUserId || messages.length === 0) return;
-    
-    // Find the last message that is not from current user
-    const lastMessageFromOther = messages
-      .filter((m: Message) => m.senderId !== currentUserId)
-      .sort((a: Message, b: Message) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
-    
-    if (!lastMessageFromOther) return;
-    
-    // Mark as read after a short delay (to avoid marking immediately)
-    const timer = setTimeout(async () => {
-      try {
-        const { markReadUpTo } = await import('../lib/reads');
-        await markReadUpTo(selectedConvId, { messageId: lastMessageFromOther.id });
-        
-        // Invalidate unread count
-        queryClient.invalidateQueries({ queryKey: ['unread', selectedConvId] });
-      } catch (err) {
-        console.error('Failed to mark message as read:', err);
-      }
-    }, 500);
-    
-    return () => clearTimeout(timer);
-  }, [selectedConvId, currentUserId, messages, queryClient]);
+  // ❌ REMOVED: Duplicate mark-read effect (causes infinite loop)
+  // Already handled by useEffect at line 278 with proper hasUnread check
 
   // Auto scroll is handled by flex-col-reverse layout
   
@@ -726,30 +708,70 @@ export function ChatPage() {
     }
   };
 
+  // NEW: Handle voice message upload
+  const handleVoiceUpload = async (
+    file: File,
+    meta: { duration: number },
+  ) => {
+    if (!selectedConvId || !currentUserId) return;
+
+    try {
+      console.log('🎤 Uploading voice message:', file.name, file.type, file.size);
+
+      // Use voice endpoint for audio upload
+      const formData = new FormData();
+      formData.append('file', file, file.name || `voice-${Date.now()}.webm`);
+      formData.append('conversationId', selectedConvId);
+      formData.append('duration', `${Math.max(0, Math.round(meta.duration ?? 0))}`);
+
+      const workspaceId = localStorage.getItem('x-workspace-id') || 'ws_default';
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}/voice-messages`,
+        {
+          method: 'POST',
+          headers: {
+            'X-User-Id': currentUserId,
+            'X-Workspace-Id': workspaceId,
+          },
+          body: formData,
+        },
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Voice upload failed');
+      }
+
+      const data = await response.json();
+      console.log('🎤 Voice message sent:', data);
+
+      // Refresh messages
+      queryClient.invalidateQueries({ queryKey: ['messages', selectedConvId] });
+    } catch (error) {
+      console.error('🎤 Voice upload failed:', error);
+      alert(`Voice upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
   // NEW: Handle paste image (PHẦN 30)
   const handlePasteImage = async (file: File) => {
     if (!selectedConvId || !currentUserId) return;
 
     try {
       console.log('📋 Pasting image:', file.name, file.type, file.size);
-      
-      const access = localStorage.getItem('access_token');
-      if (!access) {
-        throw new Error('Not authenticated');
-      }
 
       // Use paste-image endpoint for fast upload
       const formData = new FormData();
       formData.append('file', file, file.name || 'paste.png');
 
+      const workspaceId = localStorage.getItem('x-workspace-id') || 'ws_default';
       const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/messages/${selectedConvId}/paste-image`,
+        `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}/messages/${selectedConvId}/paste-image`,
         {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${access}`,
             'X-User-Id': currentUserId,
-            'X-Workspace-Id': localStorage.getItem('x-workspace-id') || '',
+            'X-Workspace-Id': workspaceId,
           },
           body: formData,
         },
@@ -1386,6 +1408,7 @@ export function ChatPage() {
                 conversationId={selectedConvId}
                 onSend={handleSendMessage}
                 onFileUpload={handleFileUpload}
+                onVoiceUpload={handleVoiceUpload}
                 onPasteImage={handlePasteImage}
                 disabled={sendMessageMutation.isPending}
                 onTypingStart={startTyping}

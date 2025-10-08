@@ -12,6 +12,7 @@ import { ShadcnDemo } from './components/ShadcnDemo';
 import { DevTools } from './components/DevTools';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { Toaster } from 'react-hot-toast';
+import { FeaturesTestPage } from './pages/FeaturesTestPage';
 
 
 function AppContent() {
@@ -39,6 +40,7 @@ function AppContent() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/debug" element={<DebugPage />} />
               <Route path="/shadcn-demo" element={<ShadcnDemo />} />
+              <Route path="/test" element={<FeaturesTestPage />} />
               <Route 
                 path="/admin" 
                 element={

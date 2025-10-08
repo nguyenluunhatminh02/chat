@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -24,10 +24,19 @@ import { TransferModule } from './modules/transfer/transfer.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { LinkPreviewModule } from './modules/link-preview/link-preview.module';
 import { CacheModule } from './common/cache/cache.module';
+import { TranslationModule } from './modules/translation/translation.module';
+import { VoiceMessagesModule } from './modules/voice-messages/voice-messages.module';
+import { ScheduledMessagesModule } from './modules/scheduled-messages/scheduled-messages.module';
+import { ForwardingModule } from './modules/forwarding/forwarding.module';
+import { UserPresenceModule } from './modules/user-presence/user-presence.module';
+import { DraftsModule } from './modules/drafts/drafts.module';
+import { ScheduleModule } from '@nestjs/schedule';
+import { HeaderUserMiddleware } from './common/middleware/header-auth.middleware';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(), // For cron jobs
     CacheModule,
     BullModule.forRoot({
       prefix: process.env.BULL_PREFIX || 'app',
@@ -59,6 +68,17 @@ import { CacheModule } from './common/cache/cache.module';
     TransferModule,
     AnalyticsModule,
     LinkPreviewModule,
+    // New features
+    TranslationModule,
+    VoiceMessagesModule,
+    ScheduledMessagesModule,
+    ForwardingModule,
+    UserPresenceModule,
+    DraftsModule,
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(HeaderUserMiddleware).forRoutes('*');
+  }
+}

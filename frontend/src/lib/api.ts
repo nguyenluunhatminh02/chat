@@ -426,3 +426,55 @@ export async function getAnalyticsTopConversations(userId: string, workspaceId: 
   });
   return json(res);
 }
+
+/* ========== API Object for Axios-like Usage ========== */
+// Helper to get auth headers
+function getAuthHeaders(): Record<string, string> {
+  const userId = localStorage.getItem('x-user-id') || 'u1';
+  const workspaceId = localStorage.getItem('x-workspace-id') || 'ws_default';
+  return {
+    'X-User-Id': userId,
+    'X-Workspace-Id': workspaceId,
+  };
+}
+
+export const api = {
+  get: async <T = unknown>(path: string, config?: RequestInit): Promise<{ data: T }> => {
+    const res = await http(path, { 
+      ...config, 
+      method: 'GET',
+      headers: { ...getAuthHeaders(), ...config?.headers },
+    });
+    const data = await json<T>(res);
+    return { data };
+  },
+  post: async <T = unknown>(path: string, body?: unknown, config?: RequestInit): Promise<{ data: T }> => {
+    const res = await http(path, {
+      ...config,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders(), ...config?.headers },
+      body: JSON.stringify(body),
+    });
+    const data = await json<T>(res);
+    return { data };
+  },
+  put: async <T = unknown>(path: string, body?: unknown, config?: RequestInit): Promise<{ data: T }> => {
+    const res = await http(path, {
+      ...config,
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders(), ...config?.headers },
+      body: JSON.stringify(body),
+    });
+    const data = await json<T>(res);
+    return { data };
+  },
+  delete: async <T = unknown>(path: string, config?: RequestInit): Promise<{ data: T }> => {
+    const res = await http(path, { 
+      ...config, 
+      method: 'DELETE',
+      headers: { ...getAuthHeaders(), ...config?.headers },
+    });
+    const data = await json<T>(res);
+    return { data };
+  },
+};

@@ -37,7 +37,24 @@ export type Conversation = {
   } | null;
 };
 
-export type MessageType = 'TEXT' | 'IMAGE' | 'FILE' | 'SYSTEM';
+export type MessageType = 'TEXT' | 'IMAGE' | 'FILE' | 'SYSTEM' | 'VOICE_MESSAGE';
+
+export type FileObject = {
+  id: string;
+  key: string;
+  mime: string;
+  size: number;
+  url?: string;
+  status: 'READY' | 'PROCESSING' | 'FAILED';
+};
+
+export type Attachment = {
+  id: string;
+  messageId: string;
+  fileId: string;
+  file: FileObject;
+};
+
 export type Message = {
   id: string;
   conversationId: string;
@@ -45,8 +62,9 @@ export type Message = {
   type: MessageType;
   content?: string | null;
   parentId?: string | null;
-  metadata?: unknown;
+  metadata?: Record<string, unknown> | null;
   editedAt?: string | null;
   deletedAt?: string | null;
   createdAt: string;
+  attachment?: Attachment[]; // NEW: Support file attachments
 };

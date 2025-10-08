@@ -25,5 +25,6 @@ import { FilesModule } from '../files/files.module';
     OutboxProducer,
   ],
   controllers: [MessagesController],
+  exports: [MessagesService],
 })
 export class MessagesModule {}
