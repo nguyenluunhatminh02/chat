@@ -87,10 +87,10 @@ export function CreateGroupModal({ open, onOpenChange }: CreateGroupModalProps) 
           <DialogTitle className="text-gray-900">Create Group Conversation</DialogTitle>
         </DialogHeader>
         
-        <div className="space-y-4 pt-4 flex-1 overflow-hidden flex flex-col">
+        <div className="flex flex-col flex-1 pt-4 space-y-4 overflow-hidden">
           {/* Group Name */}
           <div>
-            <label className="text-sm font-medium text-gray-700 mb-1 block">
+            <label className="block mb-1 text-sm font-medium text-gray-700">
               Group Name <span className="text-red-500">*</span>
             </label>
             <Input
@@ -104,7 +104,7 @@ export function CreateGroupModal({ open, onOpenChange }: CreateGroupModalProps) 
 
           {/* Selected Members Pills */}
           {selectedUserIds.size > 0 && (
-            <div className="flex flex-wrap gap-2 p-3 bg-indigo-50 rounded-lg border border-indigo-200">
+            <div className="flex flex-wrap gap-2 p-3 border border-indigo-200 rounded-lg bg-indigo-50">
               {selectedUsers.map(user => (
                 <div
                   key={user.id}
@@ -115,7 +115,7 @@ export function CreateGroupModal({ open, onOpenChange }: CreateGroupModalProps) 
                   </span>
                   <button
                     onClick={() => toggleUser(user.id)}
-                    className="text-gray-400 hover:text-red-500 transition-colors"
+                    className="text-gray-400 transition-colors hover:text-red-500"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -126,7 +126,7 @@ export function CreateGroupModal({ open, onOpenChange }: CreateGroupModalProps) 
 
           {/* Search Users */}
           <div>
-            <label className="text-sm font-medium text-gray-700 mb-1 block">
+            <label className="block mb-1 text-sm font-medium text-gray-700">
               Add Members <span className="text-red-500">*</span> ({selectedUserIds.size} selected)
             </label>
             <Input
@@ -138,9 +138,9 @@ export function CreateGroupModal({ open, onOpenChange }: CreateGroupModalProps) 
           </div>
 
           {/* User List */}
-          <div className="border rounded-lg flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto border rounded-lg">
             {filteredUsers.length === 0 ? (
-              <div className="p-4 text-center text-gray-500 text-sm">
+              <div className="p-4 text-sm text-center text-gray-500">
                 {searchQuery ? 'No users found' : 'No users available'}
               </div>
             ) : (
@@ -157,7 +157,7 @@ export function CreateGroupModal({ open, onOpenChange }: CreateGroupModalProps) 
                     >
                       <div className="flex items-center gap-3">
                         {/* Avatar */}
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-400 to-purple-400 flex items-center justify-center text-white font-semibold flex-shrink-0">
+                        <div className="flex items-center justify-center flex-shrink-0 w-10 h-10 font-semibold text-white rounded-full bg-gradient-to-br from-indigo-400 to-purple-400">
                           {(user.name || user.email)[0].toUpperCase()}
                         </div>
                         
@@ -192,7 +192,7 @@ export function CreateGroupModal({ open, onOpenChange }: CreateGroupModalProps) 
           </div>
 
           {/* Action Buttons */}
-          <div className="flex gap-2 justify-end pt-2 border-t">
+          <div className="flex justify-end gap-2 pt-2 border-t">
             <Button 
               variant="ghost" 
               onClick={handleClose}
@@ -202,7 +202,7 @@ export function CreateGroupModal({ open, onOpenChange }: CreateGroupModalProps) 
             <Button 
               onClick={handleCreate}
               disabled={!groupName.trim() || selectedUserIds.size === 0 || createMutation.isPending}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+              className="text-white bg-indigo-600 hover:bg-indigo-700"
             >
               {createMutation.isPending ? 'Creating...' : `Create Group (${selectedUserIds.size} members)`}
             </Button>

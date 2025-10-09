@@ -440,7 +440,7 @@ function MessageItemInner({
                   message.type === 'TEXT' && message.content ? () => setShowTranslate(!showTranslate) : undefined
                 }
                 onForward={() => setForwardOpen(true)} // ✅ NEW
-                className="text-gray-600 transition-opacity opacity-0 group-hover:opacity-100"
+                className="text-gray-600 transition-opacity opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
               />
             )}
           </div>

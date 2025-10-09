@@ -63,7 +63,7 @@ export function AddMemberModal({ workspaceId, open, onOpenChange }: AddMemberMod
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-white sm:max-w-[500px]">
+      <DialogContent className="bg-white w-[95vw] max-w-[500px] sm:w-full">
         <DialogHeader>
           <DialogTitle className="text-gray-900">Add Member to Workspace</DialogTitle>
         </DialogHeader>
@@ -134,7 +134,7 @@ export function AddMemberModal({ workspaceId, open, onOpenChange }: AddMemberMod
               <label className="text-sm font-medium text-gray-700 mb-2 block">
                 Role
               </label>
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <button
                   onClick={() => setSelectedRole('MEMBER')}
                   className={`flex-1 px-4 py-2 rounded-lg border-2 transition-all ${
@@ -162,7 +162,7 @@ export function AddMemberModal({ workspaceId, open, onOpenChange }: AddMemberMod
           )}
 
           {/* Action Buttons */}
-          <div className="flex gap-2 justify-end pt-2 border-t">
+          <div className="flex flex-col sm:flex-row gap-2 justify-end pt-2 border-t">
             <Button 
               variant="ghost" 
               onClick={() => {
@@ -171,13 +171,14 @@ export function AddMemberModal({ workspaceId, open, onOpenChange }: AddMemberMod
                 setSearchQuery('');
                 setSelectedRole('MEMBER');
               }}
+              className="w-full sm:w-auto"
             >
               Cancel
             </Button>
             <Button 
               onClick={handleAdd}
               disabled={!selectedUserId || addMemberMutation.isPending}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+              className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white"
             >
               {addMemberMutation.isPending ? 'Adding...' : 'Add Member'}
             </Button>

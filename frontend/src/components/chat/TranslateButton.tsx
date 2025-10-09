@@ -1,15 +1,9 @@
 import { Globe } from 'lucide-react';
 import { Button } from '../ui/Button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '../ui/DropdownMenu';
+
 import { useTranslation } from '../../hooks/useTranslation';
 import { useState } from 'react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuPortal, DropdownMenuSeparator, DropdownMenuTrigger } from '@radix-ui/react-dropdown-menu';
 
 interface TranslateButtonProps {
   messageId: string;
@@ -63,37 +57,43 @@ export function TranslateButton({ messageId, onTranslated }: TranslateButtonProp
 
   return (
     <DropdownMenu modal={false}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={loading}
-        >
-          <Globe className="w-4 h-4 mr-1" />
-          {loading ? `Translating to ${currentLang}...` : 'Translate'}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-48" sideOffset={8}>
-        <DropdownMenuLabel>Translate to...</DropdownMenuLabel>
+    <DropdownMenuTrigger asChild>
+      <Button variant="ghost" size="sm" disabled={loading}>
+        <Globe className="w-4 h-4 mr-1" />
+        {loading ? `Translating to ${currentLang}...` : 'Translate'}
+      </Button>
+    </DropdownMenuTrigger>
+
+    {/* ✅ Portal + mở lên trên + z-index cao */}
+    <DropdownMenuPortal>
+      <DropdownMenuContent
+        align="start"
+        side="top"             // mở lên trên thay vì xuống dưới
+        sideOffset={8}
+        collisionPadding={8}   // né mép màn hình
+        className="z-[9999] min-w-[12rem] p-1 rounded-xl border bg-white/95 text-gray-900 shadow-xl
+           dark:bg-neutral-900/95 dark:text-neutral-100 dark:border-neutral-700 backdrop-blur "
+      >
+        <DropdownMenuLabel>Translate to…</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <div className="max-h-[300px] overflow-y-auto">
-          {LANGUAGES.map((lang) => (
-            <DropdownMenuItem
-              key={lang.code}
-              onClick={() => handleTranslate(lang.code)}
-              disabled={loading || translatedLangs.has(lang.code)}
-            >
-              {lang.name}
-              {translatedLangs.has(lang.code) && (
-                <span className="ml-auto text-xs text-green-600">✓</span>
-              )}
-              {loading && currentLang === lang.code && (
-                <span className="ml-auto text-xs text-blue-600">...</span>
-              )}
-            </DropdownMenuItem>
-          ))}
-        </div>
+        {LANGUAGES.map((lang) => (
+          <DropdownMenuItem
+            key={lang.code}
+            onClick={() => handleTranslate(lang.code)}
+            disabled={loading || translatedLangs.has(lang.code)}
+            className='p-1.5 rounded-full hover:bg-gray-200 active:bg-gray-300 text-gray-600 hover:text-gray-800'
+          >
+            {lang.name}
+            {translatedLangs.has(lang.code) && (
+              <span className="ml-auto text-xs text-green-600">✓</span>
+            )}
+            {loading && currentLang === lang.code && (
+              <span className="ml-auto text-xs">…</span>
+            )}
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
-    </DropdownMenu>
+    </DropdownMenuPortal>
+  </DropdownMenu>
   );
 }
