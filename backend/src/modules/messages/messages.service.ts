@@ -14,6 +14,7 @@ import { ModerationService } from '../moderation/moderation.service';
 import { MentionsService } from '../mentions/mentions.service';
 import { LinkPreviewService } from '../link-preview/link-preview.service';
 import { FilesService } from '../files/files.service';
+import { CacheService } from '../../common/cache/cache.service';
 import { cleanUserText } from '../../common/safety/sanitize';
 
 @Injectable()
@@ -27,6 +28,7 @@ export class MessagesService {
     private mentions: MentionsService,
     private linkPreview: LinkPreviewService,
     private files: FilesService,
+    private cache: CacheService,
   ) {}
 
   async list(
@@ -53,14 +55,14 @@ export class MessagesService {
   }
 
   async send(userId: string, dto: SendMessageDto) {
-    // Kiểm tra user là member của conversation
-    const member = await this.prisma.conversationMember.findUnique({
-      where: {
-        conversationId_userId: { conversationId: dto.conversationId, userId },
-      },
-      select: { id: true },
+    const members = await this.prisma.conversationMember.findMany({
+      where: { conversationId: dto.conversationId },
+      select: { userId: true },
     });
-    if (!member) throw new ForbiddenException('Not a member');
+
+    if (!members.some((m) => m.userId === userId)) {
+      throw new ForbiddenException('Not a member');
+    }
 
     // NEW: Check if user is banned from this conversation
     const isBanned = await this.moderation.isBanned(dto.conversationId, userId);
@@ -71,13 +73,12 @@ export class MessagesService {
     // NEW: Check block for DIRECT conversations
     const convo = await this.prisma.conversation.findUnique({
       where: { id: dto.conversationId },
-      select: { type: true },
+      select: { type: true, workspaceId: true },
     });
-    if (convo?.type === 'DIRECT') {
-      const members = await this.prisma.conversationMember.findMany({
-        where: { conversationId: dto.conversationId },
-        select: { userId: true },
-      });
+    if (!convo) {
+      throw new NotFoundException('Conversation not found');
+    }
+    if (convo.type === 'DIRECT') {
       const otherId = members.find((m) => m.userId !== userId)?.userId;
       if (otherId && (await this.blocks.isBlockedEither(userId, otherId))) {
         throw new ForbiddenException(
@@ -186,6 +187,14 @@ export class MessagesService {
       );
       console.log(
         `✅ Created ${dto.attachments.length} attachments for message ${msg.id}`,
+      );
+    }
+
+    if (convo.workspaceId) {
+      await Promise.all(
+        members.map(({ userId: memberId }) =>
+          this.cache.del(`conversations:list:${convo.workspaceId}:${memberId}`),
+        ),
       );
     }
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { realtime } from '../lib/realtime';
 import { useLocalStorage } from '../utils/storage';
 import type { User, Conversation, Message } from '../types';
@@ -33,19 +33,34 @@ export function AppProvider({ children }: AppProviderProps) {
     };
   }, [currentUserId, apiUrl]);
 
-  const value: AppContextType = {
-    currentUserId,
-    setCurrentUserId,
-    selectedConvId,
-    setSelectedConvId,
-    users,
-    setUsers,
-    conversations,
-    setConversations,
-    messages,
-    setMessages,
-    isConnected,
-  };
+  const value: AppContextType = useMemo(
+    () => ({
+      currentUserId,
+      setCurrentUserId,
+      selectedConvId,
+      setSelectedConvId,
+      users,
+      setUsers,
+      conversations,
+      setConversations,
+      messages,
+      setMessages,
+      isConnected,
+    }),
+    [
+      currentUserId,
+      selectedConvId,
+      users,
+      conversations,
+      messages,
+      isConnected,
+      setCurrentUserId,
+      setSelectedConvId,
+      setUsers,
+      setConversations,
+      setMessages,
+    ],
+  );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

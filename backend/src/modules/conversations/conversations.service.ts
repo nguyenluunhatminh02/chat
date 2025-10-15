@@ -15,6 +15,7 @@ import { OutboxProducer } from '../outbox/outbox.producer';
 import { FilesService } from '../files/files.service';
 import type { Express } from 'express';
 import { fetch } from 'undici'; // nếu Node < 18, đảm bảo cài undici
+import { CacheService } from '../../common/cache/cache.service';
 
 @Injectable()
 export class ConversationsService {
@@ -22,6 +23,7 @@ export class ConversationsService {
     private prisma: PrismaService,
     private outbox: OutboxProducer,
     private filesService: FilesService,
+    private cache: CacheService,
   ) {}
 
   async create(
@@ -56,63 +58,104 @@ export class ConversationsService {
       memberIds: allMemberIds,
     });
 
+    await Promise.all(
+      allMemberIds.map((memberId) =>
+        this.cache.del(`conversations:list:${workspaceId}:${memberId}`),
+      ),
+    );
+
     return conv;
   }
 
   async listForUser(userId: string, workspaceId: string) {
-    const conversations = await this.prisma.conversation.findMany({
-      where: {
-        members: { some: { userId } },
-        workspaceId,
-      },
-      orderBy: { updatedAt: 'desc' },
-      include: { members: true },
-    });
+    const cacheKey = `conversations:list:${workspaceId}:${userId}`;
 
-    // (giữ nguyên, có thể tối ưu N+1 sau)
-    const conversationsWithLastMessage = await Promise.all(
-      conversations.map(async (conv) => {
-        const lastMessage = await this.prisma.message.findFirst({
-          where: { conversationId: conv.id, deletedAt: null },
-          orderBy: { createdAt: 'desc' },
-        });
+    return this.cache.wrap(cacheKey, 5, async () => {
+      const conversations = await this.prisma.conversation.findMany({
+        where: {
+          members: { some: { userId } },
+          workspaceId,
+        },
+        orderBy: { updatedAt: 'desc' },
+        include: { members: true },
+      });
 
-        if (!lastMessage) {
-          // Generate presigned avatar URL if avatarKey exists
-          let avatarUrl;
-          if (conv.avatarKey) {
+      if (conversations.length === 0) {
+        return [];
+      }
+
+      const conversationIds = conversations.map((conv) => conv.id);
+
+      const [lastMessagesRaw, avatarUrls] = await Promise.all([
+        this.prisma.message.findMany({
+          where: { conversationId: { in: conversationIds }, deletedAt: null },
+          orderBy: [
+            { conversationId: 'asc' },
+            { createdAt: 'desc' },
+          ],
+          distinct: ['conversationId'],
+          select: {
+            id: true,
+            conversationId: true,
+            content: true,
+            createdAt: true,
+            senderId: true,
+          },
+        }),
+        Promise.all(
+          conversations.map(async (conv) => {
+            if (!conv.avatarKey) {
+              return null;
+            }
+
             try {
               const { url } = await this.filesService.presignGet(
                 conv.avatarKey,
-                600, // 10 minutes
+                600,
               );
-              avatarUrl = url;
+              return url;
             } catch (err) {
               console.error('Error generating avatar URL:', err);
+              return null;
             }
-          }
+          }),
+        ),
+      ]);
 
-          return { ...conv, lastMessage: null, avatarUrl };
+      const senderIds = Array.from(
+        new Set(
+          lastMessagesRaw
+            .map((message) => message.senderId)
+            .filter((value): value is string => Boolean(value)),
+        ),
+      );
+
+      const senders = senderIds.length
+        ? await this.prisma.user.findMany({
+            where: { id: { in: senderIds } },
+            select: { id: true, email: true, name: true },
+          })
+        : [];
+
+      const sendersMap = new Map(senders.map((user) => [user.id, user]));
+      const lastMessageMap = new Map(
+        lastMessagesRaw.map((message) => [message.conversationId, message]),
+      );
+
+      return conversations.map((conv, index) => {
+        const lastMessage = lastMessageMap.get(conv.id);
+        const avatarUrl = avatarUrls[index] ?? null;
+
+        if (!lastMessage) {
+          return { ...conv, avatarUrl, lastMessage: null };
         }
 
-        const user = await this.prisma.user.findUnique({
-          where: { id: lastMessage.senderId },
-          select: { id: true, email: true, name: true },
-        });
-
-        // Generate presigned avatar URL if avatarKey exists
-        let avatarUrl;
-        if (conv.avatarKey) {
-          try {
-            const { url } = await this.filesService.presignGet(
-              conv.avatarKey,
-              600, // 10 minutes
-            );
-            avatarUrl = url;
-          } catch (err) {
-            console.error('Error generating avatar URL:', err);
-          }
-        }
+        const sender =
+          sendersMap.get(lastMessage.senderId) ?? {
+            id: lastMessage.senderId,
+            email: 'Unknown',
+            name: null,
+          };
 
         return {
           ...conv,
@@ -120,17 +163,11 @@ export class ConversationsService {
           lastMessage: {
             content: lastMessage.content,
             createdAt: lastMessage.createdAt.toISOString(),
-            user: user || {
-              id: lastMessage.senderId,
-              email: 'Unknown',
-              name: null,
-            },
+            user: sender,
           },
         };
-      }),
-    );
-
-    return conversationsWithLastMessage;
+      });
+    });
   }
 
   /** ✅ Upload avatar: lưu key (ưu tiên thumbnail), KHÔNG lưu presigned URL */
